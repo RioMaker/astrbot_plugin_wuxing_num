@@ -1,0 +1,7 @@
+name: wuxing_num
+display_name: 五行数字卦
+desc: 以五个数字计算五行流转，只处理数字卦，不干涉六爻起卦。
+version: v1.0.0
+author: haxif
+repo: ""
+
