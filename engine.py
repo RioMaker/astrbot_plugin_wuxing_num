@@ -14,6 +14,10 @@ DIGIT_ELEMENT = {
     "4": "金", "9": "金",
     "5": "土", "0": "土",
 }
+DIGIT_YIN_YANG = {
+    digit: ("阳" if int(digit) % 2 else "阴")
+    for digit in "0123456789"
+}
 GENERATES = {"水": "木", "木": "火", "火": "土", "土": "金", "金": "水"}
 CONTROLS = {"水": "火", "火": "金", "金": "木", "木": "土", "土": "水"}
 
@@ -60,6 +64,22 @@ def parse_five_digits(value: str) -> str:
     if len(parts) == 5 and all(re.fullmatch(r"[0-9]", part) for part in parts):
         return "".join(parts)
     raise ValueError("必须提供恰好五个数字，每个数字只能是 0 到 9。")
+
+
+def yin_yang_summary(digits: str) -> tuple[tuple[str, ...], str]:
+    """按奇数为阳、偶数（含 0）为阴，返回逐位阴阳和总体状态。"""
+    values = tuple(DIGIT_YIN_YANG[digit] for digit in digits)
+    yang = values.count("阳")
+    yin = values.count("阴")
+    if yang == 5:
+        state = "纯阳"
+    elif yin == 5:
+        state = "纯阴"
+    elif yang > yin:
+        state = "阳盛阴弱"
+    else:
+        state = "阴盛阳弱"
+    return values, f"阳{yang}、阴{yin}（{state}）"
 
 
 def infer_root(question: str) -> str:
@@ -132,11 +152,13 @@ def calculate(question: str, numbers: str, root_element: str | None = None) -> D
 
 
 def format_result(result: DivinationResult) -> str:
+    yin_yang, yin_yang_state = yin_yang_summary(result.digits)
     paths = "；".join(
         f"{item.source}→{item.target}（{item.name}）" for item in result.transitions
     )
     return "\n".join((
         f"数字：{' '.join(result.digits)}",
+        f"阴阳：{' → '.join(yin_yang)}；{yin_yang_state}",
         f"五行：{' → '.join(result.elements)} → {result.elements[0]}",
         f"根气：{result.root}",
         f"流转：{paths}",

@@ -5,7 +5,7 @@ import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from engine import calculate, parse_five_digits  # noqa: E402
+from engine import calculate, format_result, parse_five_digits, yin_yang_summary  # noqa: E402
 
 
 class EngineTests(unittest.TestCase):
@@ -17,6 +17,15 @@ class EngineTests(unittest.TestCase):
         for value in ("1234", "123456", "1 2 3 45", "abcde"):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 parse_five_digits(value)
+
+    def test_digits_are_split_into_yin_and_yang(self):
+        values, summary = yin_yang_summary("12340")
+        self.assertEqual(values, ("阳", "阴", "阳", "阴", "阴"))
+        self.assertEqual(summary, "阳2、阴3（阴盛阳弱）")
+
+    def test_formatted_result_contains_yin_yang(self):
+        text = format_result(calculate("出行是否顺利", "13824", "水"))
+        self.assertIn("阴阳：阳 → 阳 → 阴 → 阴 → 阴", text)
 
     def test_success_is_definitive(self):
         result = calculate("出行是否顺利", "13824", "水")
