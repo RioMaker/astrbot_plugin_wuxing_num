@@ -1,7 +1,6 @@
 name: wuxing_num
 display_name: 五行数字卦
-desc: 以五个数字计算五行流转，只处理数字卦，不干涉六爻起卦。
-version: v1.0.0
+desc: 以五个数字计算五行流转，生成故宫宫色与五行纹样卦图，并由 Agent 标注逐位象意；不干涉六爻起卦。
+version: v1.1.0
 author: haxif
 repo: ""
-
