@@ -9,6 +9,7 @@ sys.path.insert(0, str(ROOT))
 
 from engine import calculate  # noqa: E402
 from renderer import ELEMENT_STYLE, WuxingChartRenderer  # noqa: E402
+import renderer as renderer_module  # noqa: E402
 
 
 def test_renderer_creates_palace_style_png(tmp_path) -> None:
@@ -37,6 +38,10 @@ def test_renderer_creates_palace_style_png(tmp_path) -> None:
         assert image.format == "PNG"
         assert image.mode == "RGB"
         assert image.size == (1440, 1900)
+        # All five positions contain the white icon medallion, not an empty
+        # flat-colour palace. This also covers glyph pasting on the PNG canvas.
+        for cx, cy in [(720, 590), (1080, 785), (940, 1120), (500, 1120), (360, 785)]:
+            assert image.getpixel((cx - 51, cy - 66)) == (255, 255, 255)
 
 
 def test_each_element_has_distinct_color_and_pattern() -> None:
@@ -62,3 +67,19 @@ def test_renderer_rejects_incomplete_symbolism(tmp_path) -> None:
         assert "五条" in str(exc)
     else:
         raise AssertionError("incomplete symbolism should be rejected")
+
+
+def test_missing_icon_asset_still_renders(tmp_path, monkeypatch) -> None:
+    def missing():
+        raise FileNotFoundError("icon strip absent")
+
+    monkeypatch.setattr(renderer_module, "load_icons", missing)
+    output = WuxingChartRenderer().render(
+        calculate("测试", "13254", "水"),
+        question="测试", matter_type="综合",
+        symbolic_meanings=("起因", "承接", "转折", "落实", "归结"),
+        symbolic_summary="素材丢失时仍显示五行流转。",
+        output_path=tmp_path / "fallback.png",
+    )
+    with Image.open(output) as image:
+        assert image.size == (1440, 1900)

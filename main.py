@@ -13,6 +13,7 @@ from astrbot.api.star import Context, Star, register
 
 from .engine import DivinationResult, ELEMENTS, calculate, format_result
 from .renderer import ChartRenderError, WuxingChartRenderer
+from .element_icons import ICON_EXPLANATION
 
 
 PLUGIN_NAME = "wuxing_num"
@@ -32,7 +33,7 @@ class Symbolism:
     PLUGIN_NAME,
     "haxif",
     "以五个数字判断五行流转并生成宫色象意卦图；只响应专用命令或专用 Agent 工具。",
-    "1.1.0",
+    "1.2.0",
 )
 class WuxingNumberDivinationPlugin(Star):
     def __init__(self, context: Context):
@@ -166,6 +167,7 @@ class WuxingNumberDivinationPlugin(Star):
 阴阳与流转：{relations}
 根气：{result.root}
 固定结论：{result.verdict}；固定断语：{result.phrase}
+配图说明：{ICON_EXPLANATION}
 
 请只返回 JSON，不要 Markdown：
 {{"matter_type":"2至8个汉字的事物类型","meanings":["第1位象意，不超过16字","第2位象意，不超过16字","第3位象意，不超过16字","第4位象意，不超过16字","第5位象意，不超过16字"],"summary":"结合问题、根气和流转的明确总象，不超过70字"}}
@@ -258,6 +260,8 @@ class WuxingNumberDivinationPlugin(Star):
 
         禁止用于六爻、铜钱卦、摇卦、爻辞、纳甲等请求。先根据问题本质在
         水火木金土中选择唯一根气，再把该字作为 root_element 传入；不得含糊。
+        卦图使用专为五行生成的水纹、火焰、枝叶、金属刃面和山岩徽记。
+        金为金属而非雷；象意、生克按五行解释，不引入游戏元素反应。
 
         Args:
             question(string): 用户实际所问之事。
@@ -288,7 +292,7 @@ class WuxingNumberDivinationPlugin(Star):
                 symbolism,
                 "调用此工具的 Agent",
             )
-            return f"{chart_status}\n\n{text}\n象意总览：{clean_summary}"
+            return f"{chart_status}\n\n{text}\n象意总览：{clean_summary}\n配图说明：{ICON_EXPLANATION}"
         except ValueError as exc:
             return f"调用失败：{exc}"
         except OSError:

@@ -12,8 +12,10 @@ from PIL import Image, ImageDraw, ImageFont
 
 try:
     from .engine import DivinationResult, yin_yang_summary
+    from .element_icons import load_icons
 except ImportError:  # pragma: no cover - direct local execution
     from engine import DivinationResult, yin_yang_summary
+    from element_icons import load_icons
 
 
 WIDTH = 1440
@@ -61,6 +63,11 @@ class WuxingChartRenderer:
     def __init__(self, font_path: str | Path | None = None):
         custom = Path(font_path).expanduser() if font_path else None
         self._font_path = custom if custom and custom.is_file() else self._find_font()
+        try:
+            self._icons = load_icons()
+        except (OSError, ValueError):
+            # A missing optional sprite must not break the chart or its verdict.
+            self._icons = {}
 
     def render(
         self,
@@ -84,7 +91,7 @@ class WuxingChartRenderer:
             "body": self._font(27),
             "small": self._font(22),
             "tiny": self._font(18),
-            "digit": self._font(78),
+            "digit": self._font(70),
             "element": self._font(32),
             "verdict": self._font(46),
         }
@@ -93,7 +100,7 @@ class WuxingChartRenderer:
         self._draw_background(draw)
         self._draw_header(draw, result, fonts)
         self._draw_meta(draw, question, matter_type, symbolism_source, fonts)
-        self._draw_cycle(draw, result, meanings, fonts)
+        self._draw_cycle(canvas, draw, result, meanings, fonts)
         self._draw_interpretation(draw, result, symbolic_summary, fonts)
 
         path = self._output_path(output_path)
@@ -115,7 +122,9 @@ class WuxingChartRenderer:
 
     def _draw_header(self, draw, result, fonts) -> None:
         draw.rounded_rectangle((45, 42, WIDTH - 45, 208), radius=28, fill=PALACE_RED)
-        draw.text((78, 70), "五行数字卦 · 宫色流转图", font=fonts["title"], fill="#FFF6DE")
+        draw.text((78, 70), "五行数字卦 · 元素流转图", font=fonts["title"], fill="#FFF6DE")
+        subtitle = "水火木金土 · 专属元素徽记" if self._icons else "五行纹样 · 元素标志暂不可用"
+        draw.text((82, 151), subtitle, font=fonts["small"], fill="#F2D48C")
         draw.text(
             (WIDTH - 80, 78),
             f"根气 · {result.root}",
@@ -148,7 +157,7 @@ class WuxingChartRenderer:
         draw.text((215, 352), f"事类 · {self._clean(matter_type)[:10] or '综合'}", font=fonts["small"], fill="#FFFFFF", anchor="mm")
         draw.text((WIDTH - 90, 352), f"象意来源 · {self._clean(source)[:18]}", font=fonts["small"], fill=MUTED, anchor="rm")
 
-    def _draw_cycle(self, draw, result, meanings, fonts) -> None:
+    def _draw_cycle(self, canvas, draw, result, meanings, fonts) -> None:
         panel = (64, 418, WIDTH - 64, 1332)
         draw.rounded_rectangle(panel, radius=26, fill="#F8EFDC", outline="#CDAF74", width=2)
         draw.text((92, 444), "五宫流转", font=fonts["section"], fill=PALACE_RED)
@@ -164,6 +173,7 @@ class WuxingChartRenderer:
         yin_yang, _ = yin_yang_summary(result.digits)
         for index, center in enumerate(centers):
             self._draw_node(
+                canvas,
                 draw,
                 center,
                 radius,
@@ -208,21 +218,30 @@ class WuxingChartRenderer:
         draw.rounded_rectangle((mx - width / 2, my - height / 2, mx + width / 2, my + height / 2), radius=10, fill=PAPER_LIGHT, outline=color, width=2)
         draw.text((mx, my), label, font=fonts["tiny"], fill=color, anchor="mm")
 
-    def _draw_node(self, draw, center, radius, *, position, digit, yin_yang, element, meaning, is_root, fonts) -> None:
+    def _draw_node(self, canvas, draw, center, radius, *, position, digit, yin_yang, element, meaning, is_root, fonts) -> None:
         cx, cy = center
         style = ELEMENT_STYLE[element]
         outer = 10 if is_root else 5
         draw.ellipse((cx - radius - outer, cy - radius - outer, cx + radius + outer, cy + radius + outer), fill="#E9D29A" if is_root else "#D8C18A", outline=PALACE_RED if is_root else IMPERIAL_GOLD, width=4)
         draw.ellipse((cx - radius, cy - radius, cx + radius, cy + radius), fill=style["fill"])
-        self._draw_pattern(draw, center, radius, style["pattern"], style["line"])
         text_color = style["text"]
         draw.text((cx, cy - 100), f"第{position}数 · {yin_yang}", font=fonts["tiny"], fill=text_color, anchor="ma")
-        draw.text((cx, cy - 72), digit, font=fonts["digit"], fill=text_color, anchor="ma")
+        icon = self._icons.get(element)
+        if icon is not None:
+            # Keep the generated icon's white background inside a white medallion.
+            # Digits and symbolism occupy separate areas for clear reading.
+            ix, iy = cx - 51, cy - 24
+            draw.ellipse((ix - 49, iy - 49, ix + 49, iy + 49), fill="#FFFFFF")
+            canvas.paste(icon, (ix - icon.width // 2, iy - icon.height // 2))
+            draw.text((cx + 47, cy - 27), digit, font=fonts["digit"], fill=text_color, anchor="mm")
+        else:
+            self._draw_pattern(draw, center, radius, style["pattern"], style["line"])
+            draw.text((cx, cy - 72), digit, font=fonts["digit"], fill=text_color, anchor="ma")
         root_suffix = " · 根" if is_root else ""
-        draw.text((cx, cy + 12), f"{element}{root_suffix}", font=fonts["element"], fill=text_color, anchor="ma")
+        draw.text((cx, cy + 22), f"{element}{root_suffix}", font=fonts["element"], fill=text_color, anchor="ma")
         lines = self._wrap(draw, meaning, fonts["tiny"], 188)
         for index, line in enumerate(lines[:2]):
-            draw.text((cx, cy + 58 + index * 27), line, font=fonts["tiny"], fill=text_color, anchor="ma")
+            draw.text((cx, cy + 66 + index * 24), line, font=fonts["tiny"], fill=text_color, anchor="ma")
 
     @staticmethod
     def _draw_pattern(draw, center, radius, pattern, color) -> None:
@@ -269,7 +288,7 @@ class WuxingChartRenderer:
         verdict_fill = "#E8F0E8" if result.verdict == "成" else "#F4E5DE"
         draw.rounded_rectangle((92, verdict_y, WIDTH - 92, verdict_y + 92), radius=20, fill=verdict_fill)
         draw.text((116, verdict_y + 46), f"断语 · {result.phrase}", font=fonts["body"], fill=PALACE_RED, anchor="lm")
-        draw.text((92, 1842), "五行有色 · 宫纹有别 · 结论由计算内核确定", font=fonts["small"], fill=MUTED)
+        draw.text((92, 1825), "水 · 浪纹    火 · 烈焰    木 · 枝叶    金 · 金锋    土 · 山岩", font=fonts["small"], fill=MUTED)
         draw.text((WIDTH - 92, 1842), "wuxing_num", font=fonts["small"], fill=MUTED, anchor="ra")
 
     @staticmethod
