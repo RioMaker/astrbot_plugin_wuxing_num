@@ -32,8 +32,8 @@ class Symbolism:
 @register(
     PLUGIN_NAME,
     "haxif",
-    "以五个数字判断五行流转并生成宫色象意卦图；只响应专用命令或专用 Agent 工具。",
-    "1.2.0",
+    "以五个数字判断五行流转并生成现代元素象意卦图；只响应专用命令或专用 Agent 工具。",
+    "1.3.0",
 )
 class WuxingNumberDivinationPlugin(Star):
     def __init__(self, context: Context):

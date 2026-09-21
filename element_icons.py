@@ -37,6 +37,13 @@ def load_icons(path: Path = ICON_STRIP) -> dict[str, Image.Image]:
             if bounds is None:
                 raise ValueError(f"{element}徽记为空")
             icon = icon.crop(bounds)
-            icon.thumbnail((68, 68), Image.Resampling.LANCZOS)
+            # Runtime compositing mask: remove the white atlas background, keeping
+            # the silhouette and negative spaces suitable for faint watermarks.
+            red, green, blue = icon.split()
+            darkest = ImageChops.darker(ImageChops.darker(red, green), blue)
+            alpha = darkest.point(lambda value: max(0, min(255, (245 - value) * 3)))
+            icon = icon.convert("RGBA")
+            icon.putalpha(alpha)
+            icon.thumbnail((240, 240), Image.Resampling.LANCZOS)
             icons[element] = icon
         return icons

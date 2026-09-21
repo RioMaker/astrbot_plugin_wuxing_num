@@ -1,7 +1,7 @@
 from pathlib import Path
 import sys
 
-from PIL import Image
+from PIL import Image, ImageChops, ImageDraw
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -12,7 +12,7 @@ from renderer import ELEMENT_STYLE, WuxingChartRenderer  # noqa: E402
 import renderer as renderer_module  # noqa: E402
 
 
-def test_renderer_creates_palace_style_png(tmp_path) -> None:
+def test_renderer_creates_modern_png(tmp_path) -> None:
     renderer = WuxingChartRenderer()
     result = calculate("这次求职能否成功", "13254", "木")
     output = tmp_path / "wuxing.png"
@@ -38,10 +38,34 @@ def test_renderer_creates_palace_style_png(tmp_path) -> None:
         assert image.format == "PNG"
         assert image.mode == "RGB"
         assert image.size == (1440, 1900)
-        # All five positions contain the white icon medallion, not an empty
-        # flat-colour palace. This also covers glyph pasting on the PNG canvas.
-        for cx, cy in [(720, 590), (1080, 785), (940, 1120), (500, 1120), (360, 785)]:
-            assert image.getpixel((cx - 51, cy - 66)) == (255, 255, 255)
+
+
+def test_watermarks_are_faint_and_have_no_white_background():
+    renderer = WuxingChartRenderer()
+    for element, style in ELEMENT_STYLE.items():
+        canvas = Image.new("RGB", (320, 320), style["fill"])
+        original = canvas.copy()
+        renderer._watermark(canvas, (160, 160), element)
+        difference = ImageChops.difference(original, canvas)
+        assert difference.getbbox() is not None
+        # A maximum 13% blend changes each channel by at most 34 levels.
+        assert all(high <= 34 for low, high in difference.getextrema())
+        assert renderer._icons[element].getchannel("A").getextrema() == (0, 255)
+        assert canvas.getpixel((0, 0)) == original.getpixel((0, 0))
+
+
+def test_long_chinese_text_fits_reserved_regions():
+    renderer = WuxingChartRenderer()
+    draw = ImageDraw.Draw(Image.new("RGB", (1440, 1900)))
+    for text, width, count, maximum, minimum in (
+        ("前期消息影响条件落实与能力发挥，最终需要明确确认资源安排。" * 8, 1120, 2, 28, 22),
+        ("事业成长需要资源承接与规则确认" * 8, 1252, 3, 26, 22),
+        ("消息出现机会启动能力成长资源承接规则落定继续前进", 224, 2, 21, 15),
+    ):
+        lines, font = renderer._fit(draw, text, width, count, maximum, minimum)
+        assert len(lines) <= count
+        assert all(draw.textlength(line, font=font) <= width for line in lines)
+        assert all(line[0] not in "，。；：" for line in lines)
 
 
 def test_each_element_has_distinct_color_and_pattern() -> None:
