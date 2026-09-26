@@ -225,3 +225,36 @@ def test_three_dead_casts_still_stop_same_question(tmp_path, monkeypatch):
     for _ in range(3):
         assert "死卦" in plugin._run(_Event(), "这次求职能否成功", "11111", "木")
     assert "天机不可泄露" in plugin._run(_Event(), "这次求职能否成功", "13254", "木")
+
+
+def test_explicit_wuxing_request_can_mention_prior_liuyao(tmp_path, monkeypatch):
+    module = _load_main_module()
+    monkeypatch.setattr(module, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(module, "STATE_FILE", tmp_path / "dead_streaks.json")
+    plugin = module.WuxingNumberDivinationPlugin(_Context())
+    plugin.renderer = None
+    response = asyncio.run(
+        plugin.divine_wuxing_five_numbers(
+            _Event(),
+            "这次求职能否成功，先前六爻已测，现在用五行数字测",
+            "13254",
+            "木",
+            "事业求职",
+            "消息出现｜能力生长｜行动显化｜资源承接｜规则落定",
+            "机会逐步落实",
+        )
+    )
+    assert "判定：成" in response
+    assert "本结果、次数、死卦及停问提示均不影响六爻" in response
+
+
+def test_dead_stop_notice_only_applies_to_wuxing(tmp_path, monkeypatch):
+    module = _load_main_module()
+    monkeypatch.setattr(module, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(module, "STATE_FILE", tmp_path / "dead_streaks.json")
+    plugin = module.WuxingNumberDivinationPlugin(_Context())
+    for _ in range(4):
+        response = plugin._run(_Event(), "这次求职能否成功", "11111", "木")
+        assert "同一事项仍可独立请求六爻" in response
+    assert "停止对此事继续使用五行数字卦" in response
+    assert "不要再继续询问此事" not in response

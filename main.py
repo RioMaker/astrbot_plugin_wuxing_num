@@ -19,7 +19,10 @@ from .renderer import ChartRenderError, WuxingChartRenderer
 PLUGIN_NAME = "wuxing_num"
 DATA_DIR = Path("data") / "plugin_data" / PLUGIN_NAME
 STATE_FILE = DATA_DIR / "dead_streaks.json"
-LIUYAO_TERMS = ("六爻", "铜钱", "摇卦", "爻辞", "世爻", "应爻", "纳甲")
+METHOD_SCOPE_NOTICE = (
+    "术数范围：仅五行数字卦。本结果、次数、死卦及停问提示均不影响六爻；"
+    "同一事项仍可独立请求六爻，按六爻自身记录判断准入，勿将本结果当作六爻原卦复用。"
+)
 
 
 @dataclass(frozen=True)
@@ -33,7 +36,7 @@ class Symbolism:
     PLUGIN_NAME,
     "haxif",
     "以五个数字判断五行流转并生成山水光效象意卦图；只响应专用命令或专用 Agent 工具。",
-    "1.4.1",
+    "1.4.2",
 )
 class WuxingNumberDivinationPlugin(Star):
     def __init__(self, context: Context):
@@ -103,12 +106,13 @@ class WuxingNumberDivinationPlugin(Star):
     ) -> tuple[DivinationResult | None, str]:
         error = question_error(question)
         if error:
-            return None, error
+            return None, f"{error}\n{METHOD_SCOPE_NOTICE}"
         key = self._question_key(event, question)
         if self._dead_streaks.get(key, 0) >= 3:
             return (
                 None,
-                "判定：死卦\n断语：连续三次死卦，此事天机不可泄露，请更换问题或不要再继续询问此事。",
+                "判定：死卦\n断语：五行数字卦连续三次死卦，此事天机不可泄露；请停止对此事继续使用五行数字卦。\n"
+                + METHOD_SCOPE_NOTICE,
             )
 
         result = calculate(question, numbers, root)
@@ -116,10 +120,11 @@ class WuxingNumberDivinationPlugin(Star):
         if result.is_dead and streak >= 3:
             return result, (
                 f"{format_result(result)}\n"
-                "警示：连续三次死卦，此事天机不可泄露，请更换问题或不要再继续询问此事。"
+                "警示：五行数字卦连续三次死卦，此事天机不可泄露；请停止对此事继续使用五行数字卦。\n"
+                + METHOD_SCOPE_NOTICE
             )
         suffix = f"\n死卦次数：{streak}/3" if result.is_dead else ""
-        return result, format_result(result) + suffix
+        return result, format_result(result) + suffix + "\n" + METHOD_SCOPE_NOTICE
 
     def _run(
         self, event: AstrMessageEvent, question: str, numbers: str, root: str | None
@@ -284,7 +289,12 @@ class WuxingNumberDivinationPlugin(Star):
         无事不卜：必须有真实具体的事情，随便看看、消遣、测试或没有具体事情时拒绝调用，
         请用户说明所问，不得编造问题。五行数字不设每小时起卦次数限制，保留三次死卦规则。
 
-        禁止用于六爻、铜钱卦、摇卦、爻辞、纳甲等请求。先根据问题本质在
+        五行数字与六爻完全独立，不读取或修改六爻的记录、额度和判重状态。
+        五行数字的结果及三次死卦停问提示仅适用于五行数字，不能阻止同一事项另起六爻卦；
+        六爻已测、重复起卦或额度用尽也不能阻止用户明确请求五行数字卦。
+        仅按用户当前明确选择的术数路由；历史提及六爻不代表当前请求六爻。
+        当前明确要求六爻时不要调用本工具，也不要用五行结果替代六爻原卦。
+        先根据问题本质在
         水火木金土中选择唯一根气，再把该字作为 root_element 传入；不得含糊。
         卦图使用专为五行生成的水纹、火焰、枝叶、金属刃面和山岩徽记。
         金为金属而非雷；象意、生克按五行解释，不引入游戏元素反应。
@@ -297,8 +307,6 @@ class WuxingNumberDivinationPlugin(Star):
             five_symbolic_meanings(string): 按原序写五条象意，以｜分隔，每条最多16字。
             symbolic_summary(string): 结合问题、根气与流转的总象，最多70字，不改判成败。
         """
-        if any(term in question for term in LIUYAO_TERMS):
-            return "拒绝调用：这是六爻类请求，应交由六爻插件处理。"
         if root_element not in ELEMENTS:
             return "调用失败：root_element 必须明确为水、火、木、金、土之一。"
         try:
