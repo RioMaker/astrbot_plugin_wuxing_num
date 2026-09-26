@@ -1,20 +1,20 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
 import hashlib
 import json
-from pathlib import Path
 import re
+from dataclasses import dataclass
+from pathlib import Path
 
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, register
 
-from .engine import DivinationResult, ELEMENTS, calculate, format_result
-from .renderer import ChartRenderError, WuxingChartRenderer
 from .element_icons import ICON_EXPLANATION
-
+from .engine import ELEMENTS, DivinationResult, calculate, format_result
+from .question_policy import question_error
+from .renderer import ChartRenderError, WuxingChartRenderer
 
 PLUGIN_NAME = "wuxing_num"
 DATA_DIR = Path("data") / "plugin_data" / PLUGIN_NAME
@@ -33,7 +33,7 @@ class Symbolism:
     PLUGIN_NAME,
     "haxif",
     "以五个数字判断五行流转并生成山水光效象意卦图；只响应专用命令或专用 Agent 工具。",
-    "1.4.0",
+    "1.4.1",
 )
 class WuxingNumberDivinationPlugin(Star):
     def __init__(self, context: Context):
@@ -85,7 +85,9 @@ class WuxingNumberDivinationPlugin(Star):
     def _parse_command(text: str) -> tuple[str, str, str | None]:
         parts = [part.strip() for part in re.split(r"[|｜]", text, maxsplit=2)]
         if len(parts) < 2 or not parts[0] or not parts[1]:
-            raise ValueError("格式：/数字卦 你要问的事 | 五个数字；可选在末尾加 | 根气五行。")
+            raise ValueError(
+                "格式：/数字卦 你要问的事 | 五个数字；可选在末尾加 | 根气五行。"
+            )
         parts[0] = re.sub(r"^/?数字卦\s*", "", parts[0]).strip()
         if not parts[0]:
             raise ValueError("请在 /数字卦 后写明你要问的具体事情。")
@@ -99,9 +101,15 @@ class WuxingNumberDivinationPlugin(Star):
         numbers: str,
         root: str | None,
     ) -> tuple[DivinationResult | None, str]:
+        error = question_error(question)
+        if error:
+            return None, error
         key = self._question_key(event, question)
         if self._dead_streaks.get(key, 0) >= 3:
-            return None, "判定：死卦\n断语：连续三次死卦，此事天机不可泄露，请更换问题或不要再继续询问此事。"
+            return (
+                None,
+                "判定：死卦\n断语：连续三次死卦，此事天机不可泄露，请更换问题或不要再继续询问此事。",
+            )
 
         result = calculate(question, numbers, root)
         streak = self._apply_dead_streak(key, result.is_dead)
@@ -113,7 +121,9 @@ class WuxingNumberDivinationPlugin(Star):
         suffix = f"\n死卦次数：{streak}/3" if result.is_dead else ""
         return result, format_result(result) + suffix
 
-    def _run(self, event: AstrMessageEvent, question: str, numbers: str, root: str | None) -> str:
+    def _run(
+        self, event: AstrMessageEvent, question: str, numbers: str, root: str | None
+    ) -> str:
         """Compatibility wrapper retained for existing callers and tests."""
         return self._resolve(event, question, numbers, root)[1]
 
@@ -130,7 +140,13 @@ class WuxingNumberDivinationPlugin(Star):
 
     @staticmethod
     def _fallback_symbolism(result, question: str) -> Symbolism:
-        types = {"水": "流动消息", "火": "情感名望", "木": "事业成长", "金": "财务决断", "土": "家庭根基"}
+        types = {
+            "水": "流动消息",
+            "火": "情感名望",
+            "木": "事业成长",
+            "金": "财务决断",
+            "土": "家庭根基",
+        }
         bases = {
             "水": "消息、流动与远方",
             "火": "显现、热情与名声",
@@ -149,7 +165,9 @@ class WuxingNumberDivinationPlugin(Star):
         )
         return Symbolism(types[result.root], meanings, summary)  # type: ignore[arg-type]
 
-    async def _analyze_symbolism(self, event, result, question: str) -> tuple[Symbolism, str]:
+    async def _analyze_symbolism(
+        self, event, result, question: str
+    ) -> tuple[Symbolism, str]:
         fallback = self._fallback_symbolism(result, question)
         get_provider_id = getattr(self.context, "get_current_chat_provider_id", None)
         llm_generate = getattr(self.context, "llm_generate", None)
@@ -157,13 +175,12 @@ class WuxingNumberDivinationPlugin(Star):
             return fallback, "本地规则回退"
 
         relations = "；".join(
-            f"{item.source}→{item.target}（{item.name}）"
-            for item in result.transitions
+            f"{item.source}→{item.target}（{item.name}）" for item in result.transitions
         )
         prompt = f"""你是五行数字卦的象意标注器，只分析象意，不得修改计算结论。
 用户问题：{question}
-五个数字：{' '.join(result.digits)}
-五行顺序：{' → '.join(result.elements)}
+五个数字：{" ".join(result.digits)}
+五行顺序：{" → ".join(result.elements)}
 阴阳与流转：{relations}
 根气：{result.root}
 固定结论：{result.verdict}；固定断语：{result.phrase}
@@ -187,7 +204,9 @@ class WuxingNumberDivinationPlugin(Star):
             meanings_raw = payload.get("meanings")
             if not isinstance(meanings_raw, list):
                 raise ValueError("meanings 不是数组")
-            meanings = self._parse_symbolic_meanings("｜".join(str(item) for item in meanings_raw))
+            meanings = self._parse_symbolic_meanings(
+                "｜".join(str(item) for item in meanings_raw)
+            )
             matter_type = " ".join(str(payload.get("matter_type") or "").split())[:10]
             summary = " ".join(str(payload.get("summary") or "").split())[:120]
             if not matter_type or not summary:
@@ -199,7 +218,9 @@ class WuxingNumberDivinationPlugin(Star):
             logger.warning(f"wuxing_num：LLM 象意分析失败，使用本地回退：{exc}")
         return fallback, "本地规则回退"
 
-    async def _render_and_send(self, event, result, question: str, symbolism: Symbolism, source: str) -> str:
+    async def _render_and_send(
+        self, event, result, question: str, symbolism: Symbolism, source: str
+    ) -> str:
         if self.renderer is None:
             return "图片渲染器不可用，已回退为文字卦象"
         image_path: Path | None = None
@@ -237,7 +258,9 @@ class WuxingNumberDivinationPlugin(Star):
                 yield event.plain_result(text)
                 return
             symbolism, source = await self._analyze_symbolism(event, result, question)
-            chart_status = await self._render_and_send(event, result, question, symbolism, source)
+            chart_status = await self._render_and_send(
+                event, result, question, symbolism, source
+            )
             yield event.plain_result(f"{chart_status}\n\n{text}")
         except ValueError as exc:
             yield event.plain_result(str(exc))
@@ -258,6 +281,9 @@ class WuxingNumberDivinationPlugin(Star):
     ) -> str:
         """仅在用户明确要求五行数字卦并给出恰好五个数字时调用。
 
+        无事不卜：必须有真实具体的事情，随便看看、消遣、测试或没有具体事情时拒绝调用，
+        请用户说明所问，不得编造问题。五行数字不设每小时起卦次数限制，保留三次死卦规则。
+
         禁止用于六爻、铜钱卦、摇卦、爻辞、纳甲等请求。先根据问题本质在
         水火木金土中选择唯一根气，再把该字作为 root_element 传入；不得含糊。
         卦图使用专为五行生成的水纹、火焰、枝叶、金属刃面和山岩徽记。
@@ -267,9 +293,9 @@ class WuxingNumberDivinationPlugin(Star):
             question(string): 用户实际所问之事。
             five_numbers(string): 用户或 AI 给出的恰好五个 0-9 数字。
             root_element(string): AI 判断的唯一根气，只能是水火木金土之一。
-            matter_type(string): AI 根据问题判断的明确事类，例如事业求职、财务交易或感情婚姻。
-            five_symbolic_meanings(string): AI 对五个数字逐位给出的象意，严格按原顺序写五条并用｜分隔，每条不超过16字。
-            symbolic_summary(string): AI 结合问题、根气与固定流转结论写出的明确总象，不超过70字，不得改判成败。
+            matter_type(string): 明确事类，例如事业求职、财务交易或感情婚姻。
+            five_symbolic_meanings(string): 按原序写五条象意，以｜分隔，每条最多16字。
+            symbolic_summary(string): 结合问题、根气与流转的总象，最多70字，不改判成败。
         """
         if any(term in question for term in LIUYAO_TERMS):
             return "拒绝调用：这是六爻类请求，应交由六爻插件处理。"
@@ -292,7 +318,10 @@ class WuxingNumberDivinationPlugin(Star):
                 symbolism,
                 "调用此工具的 Agent",
             )
-            return f"{chart_status}\n\n{text}\n象意总览：{clean_summary}\n配图说明：{ICON_EXPLANATION}"
+            return (
+                f"{chart_status}\n\n{text}\n象意总览：{clean_summary}\n"
+                f"配图说明：{ICON_EXPLANATION}"
+            )
         except ValueError as exc:
             return f"调用失败：{exc}"
         except OSError:

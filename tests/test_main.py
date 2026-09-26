@@ -2,10 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import importlib
-from pathlib import Path
 import sys
 import types
-
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 REPO_ROOT = ROOT.parent
@@ -112,7 +111,9 @@ class _Event:
         self.sent_sizes.append(path.stat().st_size)
 
 
-def test_agent_tool_sends_chart_and_returns_fixed_verdict(tmp_path, monkeypatch) -> None:
+def test_agent_tool_sends_chart_and_returns_fixed_verdict(
+    tmp_path, monkeypatch
+) -> None:
     module = _load_main_module()
     monkeypatch.setattr(module, "DATA_DIR", tmp_path)
     monkeypatch.setattr(module, "STATE_FILE", tmp_path / "dead_streaks.json")
@@ -158,7 +159,9 @@ def test_agent_tool_requires_five_ordered_meanings(tmp_path, monkeypatch) -> Non
     assert response == "调用失败：五位象意必须恰好五条，并按数字顺序用｜分隔。"
 
 
-def test_command_uses_current_llm_for_symbolism_and_sends_chart(tmp_path, monkeypatch) -> None:
+def test_command_uses_current_llm_for_symbolism_and_sends_chart(
+    tmp_path, monkeypatch
+) -> None:
     module = _load_main_module()
     monkeypatch.setattr(module, "DATA_DIR", tmp_path)
     monkeypatch.setattr(module, "STATE_FILE", tmp_path / "dead_streaks.json")
@@ -174,3 +177,51 @@ def test_command_uses_current_llm_for_symbolism_and_sends_chart(tmp_path, monkey
     assert len(replies) == 1
     assert "象意来源：当前会话模型" in replies[0]["text"]
     assert "判定：成" in replies[0]["text"]
+
+
+def test_no_matter_rejected_by_command_and_agent_without_state(tmp_path, monkeypatch):
+    module = _load_main_module()
+    monkeypatch.setattr(module, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(module, "STATE_FILE", tmp_path / "dead_streaks.json")
+    plugin = module.WuxingNumberDivinationPlugin(_Context())
+
+    async def check():
+        for question in ["随便看看", "只是好奇，看看今天运势", "没什么事", "事业"]:
+            event = _Event(f"/数字卦 {question} | 13254 | 木")
+            replies = [item async for item in plugin.number_divination(event)]
+            assert "无事不卜" in replies[0]["text"]
+            result = await plugin.divine_wuxing_five_numbers(
+                event,
+                question,
+                "13254",
+                "木",
+                "事业求职",
+                "消息出现｜能力生长｜行动显化｜资源承接｜规则落定",
+                "机会逐步落实",
+            )
+            assert "无事不卜" in result
+            assert not event.sent_sizes
+        assert "无事不卜" in plugin._run(_Event(), "", "13254", "木")
+
+    asyncio.run(check())
+    assert plugin._dead_streaks == {}
+    assert not module.STATE_FILE.exists()
+
+
+def test_valid_number_casts_have_no_hourly_or_repeat_limit(tmp_path, monkeypatch):
+    module = _load_main_module()
+    monkeypatch.setattr(module, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(module, "STATE_FILE", tmp_path / "dead_streaks.json")
+    plugin = module.WuxingNumberDivinationPlugin(_Context())
+    for _ in range(6):
+        assert "判定：成" in plugin._run(_Event(), "这次求职能否成功", "13254", "木")
+
+
+def test_three_dead_casts_still_stop_same_question(tmp_path, monkeypatch):
+    module = _load_main_module()
+    monkeypatch.setattr(module, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(module, "STATE_FILE", tmp_path / "dead_streaks.json")
+    plugin = module.WuxingNumberDivinationPlugin(_Context())
+    for _ in range(3):
+        assert "死卦" in plugin._run(_Event(), "这次求职能否成功", "11111", "木")
+    assert "天机不可泄露" in plugin._run(_Event(), "这次求职能否成功", "13254", "木")

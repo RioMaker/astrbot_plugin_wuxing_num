@@ -1,6 +1,6 @@
 name: wuxing_num
 display_name: 五行数字卦
 desc: 五行数字卦，山水背景、发光气路与半透明元素徽记，支持 Agent 逐位象意分析；不干涉六爻起卦。
-version: v1.4.0
+version: v1.4.1
 author: haxif
 repo: ""
