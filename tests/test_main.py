@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import importlib
 import sys
 import types
+import uuid
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -23,6 +25,9 @@ def _load_main_module():
         def exception(self, *_args, **_kwargs):
             pass
 
+        def error(self, *_args, **_kwargs):
+            pass
+
     class AstrMessageEvent:
         pass
 
@@ -32,6 +37,14 @@ def _load_main_module():
     class Star:
         def __init__(self, context):
             self.context = context
+            if not hasattr(context, "_plugin_kv"):
+                context._plugin_kv = {}
+
+        async def get_kv_data(self, key, default=None):
+            return copy.deepcopy(self.context._plugin_kv.get(key, default))
+
+        async def put_kv_data(self, key, value):
+            self.context._plugin_kv[key] = copy.deepcopy(value)
 
     def decorator(*_args, **_kwargs):
         return lambda func: func
@@ -75,13 +88,22 @@ class _Context:
 
 
 class _LlmContext:
+    def __init__(self, *, provider_id="provider-1", error=None):
+        self.provider_id = provider_id
+        self.error = error
+        self.calls = []
+
     async def get_current_chat_provider_id(self, *, umo):
-        assert umo == "group:100"
-        return "provider-1"
+        assert umo.startswith("group:")
+        return self.provider_id
 
     async def llm_generate(self, *, chat_provider_id, prompt):
         assert chat_provider_id == "provider-1"
         assert "不得修改计算结论" in prompt
+        self.calls.append(prompt)
+        await asyncio.sleep(0)
+        if self.error is not None:
+            raise self.error
         return types.SimpleNamespace(
             completion_text=(
                 '{"matter_type":"事业求职","meanings":['
@@ -92,13 +114,43 @@ class _LlmContext:
 
 
 class _Event:
-    def __init__(self, message_str=""):
+    def __init__(
+        self,
+        message_str="",
+        *,
+        sender_id="10001",
+        group_id="100",
+        platform_id="onebot-main",
+        message_id=None,
+    ):
         self.sent_sizes: list[int] = []
         self.message_str = message_str
-        self.unified_msg_origin = "group:100"
+        self.unified_msg_origin = f"group:{group_id}"
+        self.sender_id = sender_id
+        self.group_id = group_id
+        self.platform_id = platform_id
+        self.message_obj = types.SimpleNamespace(
+            message_id=message_id if message_id is not None else uuid.uuid4().hex
+        )
+        self.extras = {}
 
     def get_sender_id(self):
-        return "10001"
+        return self.sender_id
+
+    def get_group_id(self):
+        return self.group_id
+
+    def get_platform_id(self):
+        return self.platform_id
+
+    def get_platform_name(self):
+        return "aiocqhttp"
+
+    def get_extra(self, key, default=None):
+        return self.extras.get(key, default)
+
+    def set_extra(self, key, value):
+        self.extras[key] = value
 
     def image_result(self, path):
         return {"image": path}

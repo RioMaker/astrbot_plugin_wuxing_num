@@ -1,1 +1,39 @@
-{}
+{
+  "command_ai_analysis_enabled": {
+    "type": "bool",
+    "description": "普通数字卦指令启用 AI 象意",
+    "hint": "默认保留当前会话模型象意。关闭后仅使用本地规则排盘，不消耗 AI 次数；开启但 AI 额度用尽时仍返回本地排盘和限额提示。",
+    "default": true
+  },
+  "ai_daily_limit": {
+    "type": "int",
+    "description": "每人每天五行数字卦 AI 起卦与解读次数",
+    "hint": "范围 0-10000，默认 1 次，0 为不限。北京时间每日零点恢复，各群分别计数。同一用户消息中的起卦和解读只计一次；与六爻独立。纯本地指令不占次数。",
+    "default": 1
+  },
+  "ai_daily_group_limits": {
+    "type": "template_list",
+    "description": "指定群的 AI 每日次数",
+    "hint": "群规则覆盖上面的默认次数；首条有效匹配规则生效。未配置的群使用默认次数，各群独立计数。",
+    "default": [],
+    "templates": {
+      "group_ai_daily_limit": {
+        "name": "指定群 AI 每日次数",
+        "items": {
+          "group_id": {
+            "type": "string",
+            "description": "群号或完整 UMO",
+            "hint": "填写一个群号或该群的完整统一消息来源；留空不生效。",
+            "default": ""
+          },
+          "limit": {
+            "type": "int",
+            "description": "该群每人每天 AI 次数",
+            "hint": "范围 0-10000，覆盖默认次数；0 为不限。",
+            "default": 1
+          }
+        }
+      }
+    }
+  }
+}

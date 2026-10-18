@@ -11,6 +11,7 @@ from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, register
 
+from .ai_daily_quota import AIQuotaStorageError, DailyAIQuotaMixin
 from .element_icons import ICON_EXPLANATION
 from .engine import ELEMENTS, DivinationResult, calculate, format_result
 from .question_policy import question_error
@@ -36,13 +37,17 @@ class Symbolism:
     PLUGIN_NAME,
     "haxif",
     "以五个数字判断五行流转并生成山水光效象意卦图；只响应专用命令或专用 Agent 工具。",
-    "1.4.2",
+    "1.5.0",
 )
-class WuxingNumberDivinationPlugin(Star):
-    def __init__(self, context: Context):
+class WuxingNumberDivinationPlugin(DailyAIQuotaMixin, Star):
+    AI_DAILY_LABEL = "五行数字卦"
+
+    def __init__(self, context: Context, config=None):
         super().__init__(context)
         self.context = context
+        self.config = config if config is not None else {}
         self._dead_streaks = self._load_state()
+        self._cast_state_lock = asyncio.Lock()
         try:
             self.renderer: WuxingChartRenderer | None = WuxingChartRenderer()
         except ChartRenderError as exc:
@@ -77,11 +82,19 @@ class WuxingNumberDivinationPlugin(Star):
         return f"{sender}:{digest}"
 
     def _apply_dead_streak(self, key: str, is_dead: bool) -> int:
+        previous = self._dead_streaks.get(key)
         if is_dead:
             self._dead_streaks[key] = self._dead_streaks.get(key, 0) + 1
         else:
             self._dead_streaks.pop(key, None)
-        self._save_state()
+        try:
+            self._save_state()
+        except OSError:
+            if previous is None:
+                self._dead_streaks.pop(key, None)
+            else:
+                self._dead_streaks[key] = previous
+            raise
         return self._dead_streaks.get(key, 0)
 
     @staticmethod
@@ -97,7 +110,7 @@ class WuxingNumberDivinationPlugin(Star):
         root = parts[2] if len(parts) == 3 and parts[2] else None
         return parts[0], parts[1], root
 
-    def _resolve(
+    def _check_cast(
         self,
         event: AstrMessageEvent,
         question: str,
@@ -115,7 +128,19 @@ class WuxingNumberDivinationPlugin(Star):
                 + METHOD_SCOPE_NOTICE,
             )
 
-        result = calculate(question, numbers, root)
+        return calculate(question, numbers, root), ""
+
+    def _resolve(
+        self,
+        event: AstrMessageEvent,
+        question: str,
+        numbers: str,
+        root: str | None,
+    ) -> tuple[DivinationResult | None, str]:
+        result, error = self._check_cast(event, question, numbers, root)
+        if result is None:
+            return None, error
+        key = self._question_key(event, question)
         streak = self._apply_dead_streak(key, result.is_dead)
         if result.is_dead and streak >= 3:
             return result, (
@@ -172,12 +197,12 @@ class WuxingNumberDivinationPlugin(Star):
 
     async def _analyze_symbolism(
         self, event, result, question: str
-    ) -> tuple[Symbolism, str]:
+    ) -> tuple[Symbolism, str, str]:
         fallback = self._fallback_symbolism(result, question)
         get_provider_id = getattr(self.context, "get_current_chat_provider_id", None)
         llm_generate = getattr(self.context, "llm_generate", None)
         if not callable(get_provider_id) or not callable(llm_generate):
-            return fallback, "本地规则回退"
+            return fallback, "本地规则回退", ""
 
         relations = "；".join(
             f"{item.source}→{item.target}（{item.name}）" for item in result.transitions
@@ -194,9 +219,17 @@ class WuxingNumberDivinationPlugin(Star):
 请只返回 JSON，不要 Markdown：
 {{"matter_type":"2至8个汉字的事物类型","meanings":["第1位象意，不超过16字","第2位象意，不超过16字","第3位象意，不超过16字","第4位象意，不超过16字","第5位象意，不超过16字"],"summary":"结合问题、根气和流转的明确总象，不超过70字"}}
 五条 meanings 必须按五个数字的原顺序逐位解释，禁止改判成败，禁止使用模糊的两面话。"""
+        lease = None
         try:
             umo = str(getattr(event, "unified_msg_origin", "") or "")
             provider_id = await get_provider_id(umo=umo)
+            if not provider_id:
+                return fallback, "本地规则回退", ""
+            lease = await self._reserve_ai_daily(event)
+            if lease.error:
+                return fallback, "本地规则", lease.error
+            # Charge when the AI request starts, including failed model attempts.
+            await lease.commit()
             response = await asyncio.wait_for(
                 llm_generate(chat_provider_id=provider_id, prompt=prompt),
                 timeout=45,
@@ -216,12 +249,25 @@ class WuxingNumberDivinationPlugin(Star):
             summary = " ".join(str(payload.get("summary") or "").split())[:120]
             if not matter_type or not summary:
                 raise ValueError("事类或总象为空")
-            return Symbolism(matter_type, meanings, summary), "当前会话模型"
+            return Symbolism(matter_type, meanings, summary), "当前会话模型", ""
+        except AIQuotaStorageError:
+            logger.exception("wuxing_num：AI 每日额度记录不可用")
+            return fallback, "本地规则", "AI 额度记录暂不可用，本次仅提供本地排盘。"
         except asyncio.TimeoutError:
             logger.warning("wuxing_num：LLM 象意分析超时，使用本地回退")
         except Exception as exc:
             logger.warning(f"wuxing_num：LLM 象意分析失败，使用本地回退：{exc}")
-        return fallback, "本地规则回退"
+        finally:
+            await self._release_daily_lease(lease)
+        return fallback, "本地规则回退", ""
+
+    @staticmethod
+    async def _release_daily_lease(lease) -> None:
+        if lease is not None:
+            try:
+                await lease.release()
+            except AIQuotaStorageError:
+                logger.exception("wuxing_num：未使用的 AI 额度预约释放失败")
 
     async def _render_and_send(
         self, event, result, question: str, symbolism: Symbolism, source: str
@@ -258,15 +304,23 @@ class WuxingNumberDivinationPlugin(Star):
         """五行数字卦。格式：/数字卦 问题 | 12345 | 可选根气"""
         try:
             question, numbers, root = self._parse_command(event.message_str)
-            result, text = self._resolve(event, question, numbers, root)
+            async with self._cast_state_lock:
+                result, text = self._resolve(event, question, numbers, root)
             if result is None:
                 yield event.plain_result(text)
                 return
-            symbolism, source = await self._analyze_symbolism(event, result, question)
+            if self.config.get("command_ai_analysis_enabled", True):
+                symbolism, source, notice = await self._analyze_symbolism(
+                    event, result, question
+                )
+            else:
+                symbolism = self._fallback_symbolism(result, question)
+                source, notice = "本地规则", ""
             chart_status = await self._render_and_send(
                 event, result, question, symbolism, source
             )
-            yield event.plain_result(f"{chart_status}\n\n{text}")
+            suffix = f"\n{notice}" if notice else ""
+            yield event.plain_result(f"{chart_status}\n\n{text}{suffix}")
         except ValueError as exc:
             yield event.plain_result(str(exc))
         except OSError:
@@ -287,7 +341,10 @@ class WuxingNumberDivinationPlugin(Star):
         """仅在用户明确要求五行数字卦并给出恰好五个数字时调用。
 
         无事不卜：必须有真实具体的事情，随便看看、消遣、测试或没有具体事情时拒绝调用，
-        请用户说明所问，不得编造问题。五行数字不设每小时起卦次数限制，保留三次死卦规则。
+        请用户说明所问，不得编造问题。AI 起卦和解读按插件配置限制，同一群每人每天默认 1 次，
+        按北京时间每日重置，各群分别计数；同一用户消息中的起卦和解读只计 1 次。
+        即使由 Agent 提供象意也计入 AI 额度；达到限额时必须停止本次 AI 起卦和解读，
+        不得改用纯指令绕过；用户主动发送的纯本地指令不受 AI 额度影响。保留三次死卦规则。
 
         五行数字与六爻完全独立，不读取或修改六爻的记录、额度和判重状态。
         五行数字的结果及三次死卦停问提示仅适用于五行数字，不能阻止同一事项另起六爻卦；
@@ -309,15 +366,36 @@ class WuxingNumberDivinationPlugin(Star):
         """
         if root_element not in ELEMENTS:
             return "调用失败：root_element 必须明确为水、火、木、金、土之一。"
+        lease = None
         try:
             meanings = self._parse_symbolic_meanings(five_symbolic_meanings)
             clean_type = " ".join(str(matter_type or "").split())[:10]
             clean_summary = " ".join(str(symbolic_summary or "").split())[:120]
             if not clean_type or not clean_summary:
                 return "调用失败：Agent 必须明确提供事类、五位象意和总象。"
-            result, text = self._resolve(event, question, five_numbers, root_element)
+            async with self._cast_state_lock:
+                result, text = self._check_cast(
+                    event, question, five_numbers, root_element
+                )
             if result is None:
                 return text
+            lease = await self._reserve_ai_daily(event)
+            if lease.error:
+                return lease.error + "本次未进行新的五行数字卦 AI 起卦与解读。"
+            # Keep rollback isolated from other commands while confirming quota.
+            async with self._cast_state_lock:
+                previous_streaks = dict(self._dead_streaks)
+                result, text = self._resolve(
+                    event, question, five_numbers, root_element
+                )
+                if result is None:
+                    return text
+                try:
+                    await lease.commit()
+                except AIQuotaStorageError:
+                    self._dead_streaks = previous_streaks
+                    self._save_state()
+                    raise
             symbolism = Symbolism(clean_type, meanings, clean_summary)
             chart_status = await self._render_and_send(
                 event,
@@ -332,9 +410,14 @@ class WuxingNumberDivinationPlugin(Star):
             )
         except ValueError as exc:
             return f"调用失败：{exc}"
+        except AIQuotaStorageError:
+            logger.exception("wuxing_num：AI 每日额度记录不可用")
+            return "调用失败：AI 额度记录暂不可用，本次未返回新的 AI 起卦与解读。"
         except OSError:
             logger.exception("保存五行数字卦状态失败")
             return "调用失败：状态保存失败，本次未起卦。"
+        finally:
+            await self._release_daily_lease(lease)
 
     async def terminate(self):
         return None
