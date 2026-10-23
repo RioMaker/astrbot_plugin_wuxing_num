@@ -53,10 +53,15 @@ def _load_main_module():
         return lambda cls: cls
 
     api_module.logger = _Logger()
+    api_module.message_components = types.SimpleNamespace(
+        At=lambda *, qq: types.SimpleNamespace(qq=qq),
+        Plain=lambda text: types.SimpleNamespace(text=text),
+    )
     event_module.AstrMessageEvent = AstrMessageEvent
     event_module.filter = types.SimpleNamespace(
         command=decorator,
         llm_tool=decorator,
+        on_llm_request=decorator,
     )
     star_module.Context = Context
     star_module.Star = Star
@@ -97,18 +102,19 @@ class _LlmContext:
         assert umo.startswith("group:")
         return self.provider_id
 
-    async def llm_generate(self, *, chat_provider_id, prompt):
-        assert chat_provider_id == "provider-1"
-        assert "不得修改计算结论" in prompt
+    async def llm_generate(
+        self, *, chat_provider_id, prompt, contexts, tools, system_prompt
+    ):
+        assert chat_provider_id == self.provider_id
+        assert "不得修改计算结论" in system_prompt
+        assert contexts == [] and tools is None
         self.calls.append(prompt)
         await asyncio.sleep(0)
         if self.error is not None:
             raise self.error
         return types.SimpleNamespace(
             completion_text=(
-                '{"matter_type":"事业求职","meanings":['
-                '"消息启动","能力生长","行动显化","资源承接","规则落定"],'
-                '"summary":"机会沿五行顺序逐步落实，最终进入明确确认。"}'
+                "从消息到能力、行动、资源与规则，五行顺序流通。建议落实面试安排。"
             )
         )
 
@@ -157,6 +163,9 @@ class _Event:
 
     def plain_result(self, text):
         return {"text": text}
+
+    def chain_result(self, chain):
+        return {"chain": chain, "text": "".join(getattr(c, "text", "") for c in chain)}
 
     async def send(self, message):
         path = Path(message["image"])
@@ -211,7 +220,7 @@ def test_agent_tool_requires_five_ordered_meanings(tmp_path, monkeypatch) -> Non
     assert response == "调用失败：五位象意必须恰好五条，并按数字顺序用｜分隔。"
 
 
-def test_command_uses_current_llm_for_symbolism_and_sends_chart(
+def test_command_uses_isolated_llm_interpretation_and_local_chart(
     tmp_path, monkeypatch
 ) -> None:
     module = _load_main_module()
@@ -227,7 +236,9 @@ def test_command_uses_current_llm_for_symbolism_and_sends_chart(
 
     assert event.sent_sizes and event.sent_sizes[0] > 40_000
     assert len(replies) == 1
-    assert "象意来源：当前会话模型" in replies[0]["text"]
+    assert "象意来源：本地规则" in replies[0]["text"]
+    assert "AI 解卦：" in replies[0]["text"]
+    assert replies[0]["chain"][0].qq == event.get_sender_id()
     assert "判定：成" in replies[0]["text"]
 
 
