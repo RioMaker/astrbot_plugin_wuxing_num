@@ -8,6 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from engine import calculate  # noqa: E402
+from reading import build_reading, build_symbolism  # noqa: E402
 from renderer import WuxingChartRenderer  # noqa: E402
 
 CASES = {
@@ -80,11 +81,29 @@ CASES = {
 }
 
 
-def render_case(renderer, name, output):
+def render_case(renderer, name, output, *, with_analysis=False):
     values = CASES[name].copy()
     result = calculate(values["question"], values.pop("numbers"), values.pop("root"))
+    analysis = ""
+    if with_analysis:
+        local = build_symbolism(result)
+        values.update(
+            matter_type=local.matter_type,
+            symbolic_meanings=local.meanings,
+            symbolic_summary=local.summary,
+        )
+        analysis = build_reading(result)
     return renderer.render(
-        result, **values, symbolism_source="演示象意 · 非实时模型", output_path=output
+        result,
+        **values,
+        symbolism_source="本地程序规则" if with_analysis else "演示象意 · 非实时模型",
+        analysis_text=analysis,
+        status_note=(
+            "根气来源：预览手动指定（未调用模型）；解卦来源：程序规则。"
+            if with_analysis
+            else ""
+        ),
+        output_path=output,
     )
 
 
@@ -95,16 +114,26 @@ def main():
         "--all", action="store_true", help="render all result and layout cases"
     )
     parser.add_argument("--output-dir", type=Path, help="optional preview directory")
+    parser.add_argument(
+        "--with-analysis",
+        action="store_true",
+        help="include the actual local rule reading in the same chart (no model call)",
+    )
     args = parser.parse_args()
     renderer = WuxingChartRenderer()
     for name in CASES if args.all else (args.case,):
+        suffix = "_result" if args.with_analysis else ""
         if args.output_dir:
-            output = args.output_dir / f"{name}.png"
+            output = args.output_dir / f"{name}{suffix}.png"
         elif name == "success":
-            output = ROOT / "docs" / "example_chart.png"
+            output = (
+                ROOT
+                / "docs"
+                / ("example_result.png" if args.with_analysis else "example_chart.png")
+            )
         else:
-            output = ROOT / "docs" / "previews" / f"{name}.png"
-        print(render_case(renderer, name, output))
+            output = ROOT / "docs" / "previews" / f"{name}{suffix}.png"
+        print(render_case(renderer, name, output, with_analysis=args.with_analysis))
 
 
 if __name__ == "__main__":

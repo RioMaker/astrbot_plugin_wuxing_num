@@ -95,6 +95,8 @@ class WuxingChartRenderer:
         symbolic_meanings: Sequence[str],
         symbolic_summary: str,
         symbolism_source: str = "当前会话模型",
+        analysis_text: str = "",
+        status_note: str = "",
         output_path: str | Path | None = None,
     ) -> Path:
         meanings = [self._clean(value) for value in symbolic_meanings]
@@ -113,7 +115,38 @@ class WuxingChartRenderer:
                 "verdict": 118,
             }.items()
         }
+        # Keep the original chart intact; only grow its lower text area.
         canvas = self._background()
+        measure = ImageDraw.Draw(canvas)
+        paragraphs = []
+        for value in (analysis_text, status_note):
+            for paragraph in str(value or "").replace("\x00", "").splitlines():
+                paragraph = paragraph.strip()
+                if paragraph:
+                    paragraphs.append(
+                        self._wrap(measure, paragraph, self._font(32), 1312)
+                    )
+        footer_y = 1854
+        if paragraphs:
+            footer_y = 1930 + sum(len(lines) * 50 + 20 for lines in paragraphs) + 40
+            height = footer_y + 54
+            if height > 10000:
+                raise ChartRenderError("解卦正文超出单图容量，请使用完整文字结果")
+            extended = Image.new("RGB", (WIDTH, height), BACKGROUND)
+            extended.paste(canvas, (0, 0))
+            # Continue the lake's last row into a soft dark fade, without a seam.
+            tail = canvas.crop((0, HEIGHT - 1, WIDTH, HEIGHT)).resize(
+                (WIDTH, height - HEIGHT)
+            )
+            fade = Image.new("L", (1, tail.height))
+            fade.putdata([min(255, round(y * 255 / 180)) for y in range(tail.height)])
+            tail.paste(
+                Image.new("RGB", tail.size, BACKGROUND),
+                (0, 0),
+                fade.resize(tail.size),
+            )
+            extended.paste(tail, (0, HEIGHT))
+            canvas = extended
         draw = ImageDraw.Draw(canvas)
         self._header(draw, result, f)
         self._question(draw, question, matter_type, f)
@@ -126,12 +159,27 @@ class WuxingChartRenderer:
             strength=0.22 if result.is_dead else 0.38,
         )
         self._interpretation(draw, result, symbolic_summary, f)
+        if paragraphs:
+            draw.text(
+                (64, 1864), "解 卦 结 果", font=f["section"], fill=GOLD, anchor="lt"
+            )
+            y = 1930
+            for lines in paragraphs:
+                for line in lines:
+                    draw.text((64, y), line, font=self._font(32), fill=INK, anchor="lt")
+                    y += 50
+                y += 20
+            draw.line((64, footer_y - 24, 1376, footer_y - 24), fill=BORDER, width=1)
         draw.text(
-            (64, 1854), "WUXING  /  五行数字卦", font=f["tiny"], fill=MUTED, anchor="lt"
+            (64, footer_y),
+            "WUXING  /  五行数字卦",
+            font=f["tiny"],
+            fill=MUTED,
+            anchor="lt",
         )
         source = self._clean(symbolism_source) or "未标注"
         lines, font = self._fit(draw, f"象意 · {source}", 660, 1, 20, 18)
-        draw.text((1376, 1854), lines[0], font=font, fill=MUTED, anchor="rt")
+        draw.text((1376, footer_y), lines[0], font=font, fill=MUTED, anchor="rt")
         path = self._output_path(output_path)
         try:
             canvas.save(path, "PNG", optimize=True)

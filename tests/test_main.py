@@ -56,6 +56,9 @@ def _load_main_module():
     api_module.message_components = types.SimpleNamespace(
         At=lambda *, qq: types.SimpleNamespace(qq=qq),
         Plain=lambda text: types.SimpleNamespace(text=text),
+        Image=types.SimpleNamespace(
+            fromFileSystem=lambda path: types.SimpleNamespace(image=path)
+        ),
     )
     event_module.AstrMessageEvent = AstrMessageEvent
     event_module.filter = types.SimpleNamespace(
@@ -106,17 +109,14 @@ class _LlmContext:
         self, *, chat_provider_id, prompt, contexts, tools, system_prompt
     ):
         assert chat_provider_id == self.provider_id
-        assert "不得修改计算结论" in system_prompt
+        assert "只输出水、火、木、金、土中的一个汉字" in system_prompt
+        assert "不负责解卦" in system_prompt
         assert contexts == [] and tools is None
         self.calls.append(prompt)
         await asyncio.sleep(0)
         if self.error is not None:
             raise self.error
-        return types.SimpleNamespace(
-            completion_text=(
-                "从消息到能力、行动、资源与规则，五行顺序流通。建议落实面试安排。"
-            )
-        )
+        return types.SimpleNamespace(completion_text="木")
 
 
 class _Event:
@@ -168,7 +168,10 @@ class _Event:
         return {"chain": chain, "text": "".join(getattr(c, "text", "") for c in chain)}
 
     async def send(self, message):
-        path = Path(message["image"])
+        image = message.get("image")
+        if image is None:
+            image = next(c.image for c in message["chain"] if hasattr(c, "image"))
+        path = Path(image)
         self.sent_sizes.append(path.stat().st_size)
 
 
@@ -187,9 +190,6 @@ def test_agent_tool_sends_chart_and_returns_fixed_verdict(
             question="这次求职能否成功",
             five_numbers="13254",
             root_element="木",
-            matter_type="事业求职",
-            five_symbolic_meanings="消息出现｜能力生长｜行动显化｜资源承接｜规则落定",
-            symbolic_summary="机会从消息萌发，经过能力、行动与资源承接，最终进入规则确认。",
         )
     )
 
@@ -199,7 +199,7 @@ def test_agent_tool_sends_chart_and_returns_fixed_verdict(
     assert "象意总览" in response
 
 
-def test_agent_tool_requires_five_ordered_meanings(tmp_path, monkeypatch) -> None:
+def test_agent_tool_requires_valid_root(tmp_path, monkeypatch) -> None:
     module = _load_main_module()
     monkeypatch.setattr(module, "DATA_DIR", tmp_path)
     monkeypatch.setattr(module, "STATE_FILE", tmp_path / "dead_streaks.json")
@@ -210,24 +210,21 @@ def test_agent_tool_requires_five_ordered_meanings(tmp_path, monkeypatch) -> Non
             _Event(),
             question="测试",
             five_numbers="13254",
-            root_element="水",
-            matter_type="综合",
-            five_symbolic_meanings="只有一条",
-            symbolic_summary="测试总象",
+            root_element="雷",
         )
     )
 
-    assert response == "调用失败：五位象意必须恰好五条，并按数字顺序用｜分隔。"
+    assert response == "调用失败：root_element 必须明确为水、火、木、金、土之一。"
 
 
-def test_command_uses_isolated_llm_interpretation_and_local_chart(
+def test_command_uses_isolated_root_selection_and_local_chart(
     tmp_path, monkeypatch
 ) -> None:
     module = _load_main_module()
     monkeypatch.setattr(module, "DATA_DIR", tmp_path)
     monkeypatch.setattr(module, "STATE_FILE", tmp_path / "dead_streaks.json")
     plugin = module.WuxingNumberDivinationPlugin(_LlmContext())
-    event = _Event("/数字卦 这次求职能否成功 | 13254 | 木")
+    event = _Event("/数字卦 13254 这次求职能否成功")
 
     async def collect():
         return [item async for item in plugin.number_divination(event)]
@@ -235,11 +232,8 @@ def test_command_uses_isolated_llm_interpretation_and_local_chart(
     replies = asyncio.run(collect())
 
     assert event.sent_sizes and event.sent_sizes[0] > 40_000
-    assert len(replies) == 1
-    assert "象意来源：本地规则" in replies[0]["text"]
-    assert "AI 解卦：" in replies[0]["text"]
-    assert replies[0]["chain"][0].qq == event.get_sender_id()
-    assert "判定：成" in replies[0]["text"]
+    assert len(event.sent_sizes) == 1
+    assert replies == []  # The interpretation is already in the only chart.
 
 
 def test_no_matter_rejected_by_command_and_agent_without_state(tmp_path, monkeypatch):
@@ -258,9 +252,6 @@ def test_no_matter_rejected_by_command_and_agent_without_state(tmp_path, monkeyp
                 question,
                 "13254",
                 "木",
-                "事业求职",
-                "消息出现｜能力生长｜行动显化｜资源承接｜规则落定",
-                "机会逐步落实",
             )
             assert "无事不卜" in result
             assert not event.sent_sizes
@@ -302,9 +293,6 @@ def test_explicit_wuxing_request_can_mention_prior_liuyao(tmp_path, monkeypatch)
             "这次求职能否成功，先前六爻已测，现在用五行数字测",
             "13254",
             "木",
-            "事业求职",
-            "消息出现｜能力生长｜行动显化｜资源承接｜规则落定",
-            "机会逐步落实",
         )
     )
     assert "判定：成" in response

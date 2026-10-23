@@ -19,9 +19,9 @@ def make_plugin(tmp_path, monkeypatch, *, config=None, context=None):
     return plugin, module
 
 
-async def command(plugin, event=None):
+async def command(plugin, event=None, *, manual=False):
     event = event if event is not None else _Event()
-    event.message_str = "/数字卦 这次求职能否成功 | 13254 | 木"
+    event.message_str = "/数字卦 这次求职能否成功 | 13254" + (" | 木" if manual else "")
     replies = [item async for item in plugin.number_divination(event)]
     return replies[0]["text"]
 
@@ -31,9 +31,6 @@ async def agent(plugin, event=None, **overrides):
         "question": "这次求职能否成功",
         "five_numbers": "13254",
         "root_element": "木",
-        "matter_type": "事业求职",
-        "five_symbolic_meanings": "消息出现｜能力生长｜行动显化｜资源承接｜规则落定",
-        "symbolic_summary": "机会逐步落实",
         **overrides,
     }
     return await plugin.divine_wuxing_five_numbers(
@@ -41,15 +38,18 @@ async def agent(plugin, event=None, **overrides):
     )
 
 
-def test_command_ai_defaults_on_and_exhaustion_keeps_local_chart(tmp_path, monkeypatch):
+def test_command_ai_defaults_on_and_exhaustion_allows_manual_root(
+    tmp_path, monkeypatch
+):
     context = _LlmContext()
     plugin, _ = make_plugin(tmp_path, monkeypatch, context=context)
 
     async def run():
         first = await command(plugin)
         second = await command(plugin)
-        assert "判定：成" in first and "判定：成" in second
+        assert "判定：成" in first and "判定：" not in second
         assert "每日" in second or "每天" in second
+        assert "判定：成" in await command(plugin, manual=True)
         assert len(context.calls) == 1
         assert "本次未进行新的" in await agent(plugin)
 
@@ -67,7 +67,7 @@ def test_disabled_command_ai_never_calls_model_or_consumes_quota(tmp_path, monke
 
     async def run():
         for _ in range(3):
-            assert "判定：成" in await command(plugin)
+            assert "判定：成" in await command(plugin, manual=True)
         assert context.calls == []
         assert "判定：成" in await agent(plugin)
         assert "本次未进行新的" in await agent(plugin)
@@ -98,9 +98,7 @@ def test_agent_quota_denial_does_not_change_dead_streaks(tmp_path, monkeypatch):
         {"question": "随便看看"},
         {"five_numbers": "1234"},
         {"root_element": "雷"},
-        {"matter_type": ""},
-        {"five_symbolic_meanings": "只有一条"},
-        {"symbolic_summary": ""},
+        {"root_element": ""},
     ],
 )
 def test_invalid_agent_requests_do_not_consume_quota(tmp_path, monkeypatch, bad_args):
@@ -193,12 +191,12 @@ def test_beijing_midnight_and_same_day_reload(tmp_path, monkeypatch):
     asyncio.run(run())
 
 
-def test_missing_provider_uses_local_result_without_ai_charge(tmp_path, monkeypatch):
+def test_missing_provider_requires_root_without_ai_charge(tmp_path, monkeypatch):
     context = _LlmContext(provider_id=None)
     plugin, _ = make_plugin(tmp_path, monkeypatch, context=context)
 
     async def run():
-        assert "判定：成" in await command(plugin)
+        assert "未配置可用模型" in await command(plugin)
         assert context.calls == []
         context.provider_id = "provider-1"
         assert "判定：成" in await command(plugin)
@@ -212,8 +210,8 @@ def test_failed_model_attempt_still_consumes_ai_allowance(tmp_path, monkeypatch)
     plugin, _ = make_plugin(tmp_path, monkeypatch, context=context)
 
     async def run():
-        assert "判定：成" in await command(plugin)
-        assert "判定：成" in await command(plugin)
+        assert "取根气失败" in await command(plugin)
+        assert "额度已用完" in await command(plugin)
         assert len(context.calls) == 1
         assert "本次未进行新的" in await agent(plugin)
 
@@ -226,7 +224,8 @@ def test_parallel_commands_only_start_one_model_request(tmp_path, monkeypatch):
 
     async def run():
         replies = await asyncio.gather(command(plugin), command(plugin))
-        assert all("判定：成" in text for text in replies)
+        assert sum("判定：成" in text for text in replies) == 1
+        assert sum("额度已用完" in text for text in replies) == 1
         assert len(context.calls) == 1
 
     asyncio.run(run())
@@ -250,7 +249,7 @@ def test_state_save_failure_releases_agent_reservation(tmp_path, monkeypatch, nu
     asyncio.run(run())
 
 
-def test_quota_storage_failure_never_calls_model_and_keeps_local_command(
+def test_quota_storage_failure_never_calls_model_and_allows_manual_root(
     tmp_path, monkeypatch
 ):
     context = _LlmContext()
@@ -262,7 +261,8 @@ def test_quota_storage_failure_never_calls_model_and_keeps_local_command(
     monkeypatch.setattr(plugin, "get_kv_data", fail)
 
     async def run():
-        assert "判定：成" in await command(plugin)
+        assert "次数记录读取或保存失败" in await command(plugin)
+        assert "判定：成" in await command(plugin, manual=True)
         assert "次数记录读取或保存失败" in await agent(plugin)
         assert context.calls == []
 
@@ -288,7 +288,7 @@ def test_quota_commit_and_release_failure_still_preserves_local_fallback(
 
     async def run():
         result = await command(plugin)
-        assert "判定：成" in result
+        assert "判定：" not in result
         assert "额度记录暂不可用" in result
         assert context.calls == []
 
@@ -353,7 +353,7 @@ def test_agent_failure_rollback_does_not_overwrite_concurrent_local_command(
         monkeypatch.setattr(plugin, "put_kv_data", delayed_failure)
         ai_task = asyncio.create_task(agent(plugin, five_numbers="11111"))
         await asyncio.wait_for(confirming.wait(), timeout=1)
-        local_task = asyncio.create_task(command(plugin))
+        local_task = asyncio.create_task(command(plugin, manual=True))
         await asyncio.sleep(0)
         assert not local_task.done()
         resume.set()

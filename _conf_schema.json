@@ -3,18 +3,18 @@
     "type": "bool",
     "description": "允许 LLM 调用数字卦插件能力",
     "default": true,
-    "hint": "关闭后从聊天模型请求中移除数字卦工具，并在工具入口拒绝调用；不影响用户主动发送的 /数字卦 指令及其独立 AI 解卦开关。"
+    "hint": "关闭后隐藏数字卦工具并拒绝调用；不影响用户主动发送 /数字卦 指令。Agent 只负责取根气，解卦由程序完成。"
   },
   "command_ai_analysis_enabled": {
     "type": "bool",
-    "description": "数字卦指令启用独立 AI 解卦",
-    "hint": "先发送本地卦图，再用本次问题与卦例独立请求一次 AI，不读取群聊历史或人格、不调用工具。关闭或额度耗尽时仅返回本地排盘。",
+    "description": "数字卦指令启用 AI 取根气",
+    "hint": "AI 只根据问题返回一个根气字，不读取数字、卦例、历史或人格；随后程序解卦并返回一张图。手动指定根气可纯本地运行。关闭、额度耗尽或取根气失败时，请手动指定根气。保留原配置键以兼容旧开关。",
     "default": true
   },
   "ai_daily_limit": {
     "type": "int",
-    "description": "每人每天五行数字卦 AI 起卦与解读次数",
-    "hint": "范围 0-10000，默认 1 次，0 为不限。北京时间每日零点恢复，各群分别计数。同一用户消息中的起卦和解读只计一次；与六爻独立。纯本地指令不占次数。",
+    "description": "每人每天五行数字卦 AI 取根气次数",
+    "hint": "范围 0-10000，默认 1 次，0 为不限。北京时间每日零点恢复，各群分别计数。同一用户消息只计一次 AI 取根气；与六爻独立。程序解卦及手动根气命令不占 AI 次数。",
     "default": 1
   },
   "ai_daily_group_limits": {
@@ -44,33 +44,21 @@
   },
   "command_provider_id": {
     "type": "string",
-    "description": "指令解卦模型 ID",
+    "description": "取根气模型 ID",
     "default": "",
     "hint": "填写 AstrBot 已配置的聊天模型提供商 ID；留空使用当前会话模型。仅选择模型，不携带会话历史。",
     "_special": "select_provider"
   },
   "command_analysis_timeout_seconds": {
     "type": "int",
-    "description": "独立 AI 解卦超时秒数",
+    "description": "AI 取根气超时秒数",
     "default": 60,
-    "hint": "范围 5–180 秒，超时保留本地卦图；发起请求后计入每日次数。"
+    "hint": "范围 5–180 秒；超时不使用猜测根气判卦，可手动指定根气重试。已发起请求计入每日次数。保留原配置键以兼容旧值。"
   },
-  "command_reply_max_chars": {
-    "type": "int",
-    "description": "AI 解卦正文的字数上限",
-    "default": 280,
-    "hint": "范围 0–2000；0 为不限。包含末尾固定断语；极小值仍保留完整断语。"
-  },
-  "command_reply_trim": {
-    "type": "bool",
-    "description": "超出字数时按句截断",
-    "default": true,
-    "hint": "按完整句末截断正文，保留本地计算的固定断语；关闭后仅通过提示词控制篇幅。"
-  },
-  "command_interpretation_prompt": {
+  "command_root_prompt": {
     "type": "text",
-    "description": "指令独立 AI 解卦提示词",
+    "description": "AI 取根气补充提示词",
     "default": "",
-    "hint": "留空使用内置提示词。可用变量 {question}、{chart}、{max_chars}；插件始终附上本次问题及卦例，并限定模型不得改判。"
+    "hint": "可补充事项归类规则；插件始终附上真实问题并要求只输出一个根气字，不附卦例，不请求 AI 解卦。旧版解卦提示词不再使用。"
   }
 }

@@ -208,7 +208,7 @@ class DailyAIQuotaMixin:
                     return AIQuotaLease(
                         self,
                         error=(
-                            f"{self.AI_DAILY_LABEL}：你在当前群/会话今日的 AI 起卦与解读额度已用完"
+                            f"{self.AI_DAILY_LABEL}：你在当前群/会话今日的 AI 取根气额度已用完"
                             f"（每天 {limit} 次），北京时间次日 00:00 恢复；纯本地指令仍可使用。"
                         ),
                     )
