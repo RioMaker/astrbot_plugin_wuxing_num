@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>五行数字卦管理</title><link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <div class="shell">
+    <header class="topbar"><div class="brand"><span class="seal" aria-hidden="true">五</span><div><small>WUXING · CONTROL ROOM</small><h1>五行数字卦</h1></div></div><span id="active-kernel" class="badge">正在连接</span></header>
+    <nav aria-label="管理页面"><button class="nav active" data-tab="test" aria-current="page">起卦实验室</button><button class="nav" data-tab="settings">内核与设置</button><button class="nav" data-tab="stats">调用排行</button><button class="nav" data-tab="history">历史卦例</button></nav>
+    <p id="notice" class="notice" role="status" aria-live="polite">正在连接 AstrBot…</p>
+
+    <section id="tab-test" class="tab">
+      <div class="section-heading"><div><p class="eyebrow">01 / EXPLORE</p><h2>把每一步推演看清楚</h2><p class="muted">选择内核，输入数字与问题，在右侧查看真实生成的卦图。</p></div></div>
+      <div class="test-grid"><form id="test-form" class="panel">
+        <h3>起一卦</h3><label>测试内核<select id="test-kernel" required></select></label>
+        <p class="hint">测试选择只影响本次；正式内核在“内核与设置”保存。</p>
+        <label>想问的具体事情<textarea id="question" rows="3" maxlength="1000" required placeholder="例如：这次销售交易能否达到预期？"></textarea></label>
+        <label>五个数字<input id="numbers" class="digits-input" inputmode="numeric" maxlength="20" placeholder="15997" required autocomplete="off"></label>
+        <div class="row"><label>事项五行 / 经典根气<select id="root" required><option value="水">水 · 交易 / 流动</option><option value="火">火 · 时间 / 变化</option><option value="木">木 · 学业 / 身心</option><option value="金">金</option><option value="土">土</option></select></label><button type="button" class="secondary sample" id="sample">载入资料案例</button></div>
+        <p class="hint">由你指定事项五行，便于对照内核。经典内核的事项分类可能不同。</p>
+        <label class="check"><input id="with-ai" type="checkbox"><span>含 AI 解析<small>在程序推演后调用已配置模型，生成文字解读</small></span></label>
+        <p class="hint">不勾选时全程本地。测试会保存到卦例库，单独统计，不占群成员额度。</p>
+        <button id="cast" class="primary" type="submit" disabled>开始起卦并预览</button>
+      </form><div class="panel preview-panel"><div class="preview-heading"><h3 id="result-heading">卦图预览</h3><span id="result-kernel" class="badge subtle">等待起卦</span></div>
+        <div id="preview-empty" class="empty"><div class="orbit" aria-hidden="true"><b>水</b><b>木</b><b>火</b><b>土</b><b>金</b><span>五行流转</span></div><p>数字为起点，过程可追溯</p><small>此处展示实际内核生成的图片</small></div>
+        <img id="chart" class="chart" alt="本次数字卦图，文字推演见下方" hidden>
+        <p id="image-warning" class="hint" hidden></p>
+        <details id="reading-details" hidden><summary>查看程序推演与 AI 解读</summary><pre id="reading"></pre><h4 id="ai-title">AI 解读</h4><pre id="ai-reading"></pre></details>
+      </div></div>
+    </section>
+
+    <section id="tab-settings" class="tab" hidden>
+      <div class="section-heading"><div><p class="eyebrow">02 / ENGINE</p><h2>选择正式使用的计算内核</h2><p class="muted">保存后，指令和 Agent 工具使用同一内核。升级默认保留经典内核。</p></div></div>
+      <form id="settings-form" class="panel settings-panel"><label>当前内核<select id="kernel-id" required></select></label><div id="kernel-description" class="rule-description"></div>
+        <details><summary>查看资料内核的实现约定</summary><ol id="conventions"></ol><p class="hint">资料未写全的组合显示“待定”；应期只保留可核对的案例补数，单位不自动设为天。</p></details>
+        <div class="row"><label>后台 AI 解读模型<input id="page-provider" list="providers" maxlength="200" placeholder="选择或输入已配置的模型 ID"></label><label>指令 AI 取根气模型<input id="command-provider" list="providers" maxlength="200" placeholder="留空跟随当前会话模型"></label></div>
+        <datalist id="providers"></datalist><p class="hint">后台模型留空时使用指令模型 ID；两者都空时，后台 AI 测试会提示配置模型。</p>
+        <div class="row"><label>每人每群每日 AI 次数<input id="daily-limit" type="number" min="0" max="10000" required></label><label>AI 超时（秒）<input id="timeout" type="number" min="5" max="180" required></label></div><p class="hint">次数 0 表示不限。已有指定群覆盖规则保持生效，可在插件标准配置中编辑。</p>
+        <label class="check"><input id="command-ai" type="checkbox"><span>指令启用 AI 取根气</span></label><label class="check"><input id="tool-enabled" type="checkbox"><span>允许 Agent 调用数字卦工具</span></label>
+        <div class="actions"><button class="primary" id="save-settings" disabled>保存并生效</button><button type="button" class="secondary" id="reload-settings">重新载入</button></div>
+      </form>
+    </section>
+
+    <section id="tab-stats" class="tab" hidden>
+      <div class="section-heading"><div><p class="eyebrow">03 / ACTIVITY</p><h2>调用排行</h2><p class="muted">按已生成并保存的正式卦例次数降序排列，包含死卦；后台测试单独统计。</p></div><button class="secondary" id="refresh-stats">刷新排行</button></div>
+      <div class="metrics"><div><small>正式起卦</small><strong id="stat-total">—</strong></div><div><small>使用过 AI</small><strong id="stat-ai">—</strong></div><div><small>覆盖群 / 问卦人</small><strong id="stat-scope">—</strong></div><div><small>后台测试</small><strong id="stat-tests">—</strong></div></div>
+      <p id="stats-since" class="hint">历史统计从本版本记录启用后开始，旧每日额度不能还原历史次数。</p>
+      <div class="rank-grid"><div class="panel"><h3>群排行</h3><div class="table-scroll"><table><thead><tr><th>排名</th><th>群 / 平台</th><th>次数</th><th>含 AI</th></tr></thead><tbody id="group-ranks"></tbody></table></div></div><div class="panel"><h3>个人排行</h3><div class="table-scroll"><table><thead><tr><th>排名</th><th>问卦人 / 平台</th><th>次数</th><th>含 AI</th></tr></thead><tbody id="user-ranks"></tbody></table></div></div></div>
+      <div class="pager"><button class="secondary" id="stats-prev">上一页</button><span id="stats-page">第 1 页</span><button class="secondary" id="stats-next">下一页</button></div>
+    </section>
+
+    <section id="tab-history" class="tab" hidden>
+      <div class="section-heading"><div><p class="eyebrow">04 / ARCHIVE</p><h2>历史卦例</h2><p class="muted">保存问题、数字、问卦人、时间与当时解读。图片按需生成，卦例库只存文字。</p></div><button class="primary" id="export-all">导出所有卦例</button></div>
+      <div class="toolbar"><label>记录来源<select id="history-source"><option value="all">全部记录</option><option value="official">正式起卦</option><option value="test">后台测试</option></select></label><button class="secondary" id="refresh-history">刷新</button><span class="hint">导出 ZIP 包含完整 cases.json 与说明.md，不受筛选和分页影响。</span></div>
+      <div class="panel table-scroll"><table class="history-table"><thead><tr><th>时间 / 来源</th><th>问卦人 / 群</th><th>问题</th><th>数字 / 内核</th><th>判定</th><th>解读</th><th>详情</th></tr></thead><tbody id="history-rows"></tbody></table></div>
+      <div class="pager"><button class="secondary" id="history-prev">上一页</button><span id="history-page">第 1 页</span><button class="secondary" id="history-next">下一页</button></div>
+      <dialog id="history-dialog"><div class="preview-heading"><h3>卦例详情</h3><button id="close-dialog" class="secondary">关闭</button></div><p id="history-detail-meta" class="muted"></p><pre id="history-detail-reading"></pre><h4>AI 解读</h4><pre id="history-detail-ai"></pre><p id="history-image-warning" class="hint"></p><img id="history-chart" class="chart" alt="历史数字卦预览"></dialog>
+    </section>
+    <footer>五行数字卦 · v2.0 <span>每个结果，都保留来路。</span></footer>
+  </div><script type="module" src="./app.js"></script>
+</body></html>

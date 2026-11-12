@@ -13,14 +13,16 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, register
 
 from .ai_daily_quota import AIQuotaStorageError, DailyAIQuotaMixin
+from .case_store import CaseStore
 from .element_icons import ICON_EXPLANATION
 from .engine import (
     ELEMENTS,
     DivinationResult,
-    calculate,
     format_result,
     parse_five_digits,
 )
+from .kernels import calculate
+from .management import ManagementMixin
 from .question_policy import question_error
 from .reading import Symbolism, build_reading, build_symbolism
 from .renderer import ChartRenderError, WuxingChartRenderer
@@ -46,9 +48,9 @@ MANUAL_ROOT_HINT = (
     PLUGIN_NAME,
     "haxif",
     "以五个数字判断五行流转并生成山水光效象意卦图；只响应专用命令或专用 Agent 工具。",
-    "1.7.0",
+    "2.0.0",
 )
-class WuxingNumberDivinationPlugin(DailyAIQuotaMixin, Star):
+class WuxingNumberDivinationPlugin(ManagementMixin, DailyAIQuotaMixin, Star):
     AI_DAILY_LABEL = "五行数字卦"
 
     def __init__(self, context: Context, config=None):
@@ -57,11 +59,72 @@ class WuxingNumberDivinationPlugin(DailyAIQuotaMixin, Star):
         self.config = config if config is not None else {}
         self._dead_streaks = self._load_state()
         self._cast_state_lock = asyncio.Lock()
+        self._case_store = None
         try:
             self.renderer: WuxingChartRenderer | None = WuxingChartRenderer()
         except ChartRenderError as exc:
             self.renderer = None
             logger.warning(f"wuxing_num：图片渲染器不可用：{exc}")
+        self._register_management_api()
+
+    def _kernel_id(self):
+        return self.config.get("kernel_id", "legacy_v1")
+
+    def _get_case_store(self):
+        if self._case_store is None:
+            self._case_store = CaseStore(DATA_DIR / "cases.json")
+        return self._case_store
+
+    async def _record_cast(self, event, result, question, reading, source, root_source):
+        def field(method, fallback=""):
+            getter = getattr(event, method, None)
+            try:
+                return str(getter() or fallback) if callable(getter) else fallback
+            except Exception:  # noqa: BLE001 - optional adapter metadata must not abort a cast.
+                return fallback
+
+        platform = field("get_platform_id", field("get_platform_name", "unknown"))
+        user_id, group_id = field("get_sender_id"), field("get_group_id")
+        message_id = str(
+            getattr(getattr(event, "message_obj", None), "message_id", "") or ""
+        )
+        if not message_id:
+            import uuid
+
+            message_id = uuid.uuid4().hex
+        identity_key = [
+            platform,
+            group_id,
+            user_id,
+            message_id,
+            question,
+            result.digits,
+            result.root,
+            result.kernel_id,
+        ]
+        identity = {
+            "id": hashlib.sha256(
+                json.dumps(identity_key, ensure_ascii=False).encode()
+            ).hexdigest()[:24],
+            "source": source,
+            "platform": platform,
+            "user_id": user_id,
+            "user_name": field("get_sender_name", user_id),
+            "group_id": group_id,
+            "group_name": field("get_group_name"),
+            "root_source": root_source,
+            "ai_used": root_source != "手动指定",
+            "ai_status": "not_requested",
+            "ai_interpretation": "",
+            "ai_error": "",
+        }
+        try:
+            record = self._case_record(result, question, reading, identity)
+            await asyncio.to_thread(self._get_case_store().add, record)
+            return ""
+        except Exception:  # noqa: BLE001 - history failure is reported without losing the result.
+            logger.exception("数字卦已生成，但卦例库保存失败")
+            return "卦例保存失败，本次未纳入历史及调用排行，请管理员检查存储。"
 
     @staticmethod
     def _load_state() -> dict[str, int]:
@@ -135,6 +198,8 @@ class WuxingNumberDivinationPlugin(DailyAIQuotaMixin, Star):
         question: str,
         numbers: str,
         root: str | None,
+        *,
+        kernel_id: str | None = None,
     ) -> str:
         error = question_error(question)
         if error:
@@ -143,7 +208,9 @@ class WuxingNumberDivinationPlugin(DailyAIQuotaMixin, Star):
         if root is not None and root not in ELEMENTS:
             raise ValueError("根气必须是水、火、木、金、土之一。")
         key = self._question_key(event, question)
-        if self._dead_streaks.get(key, 0) >= 3:
+        if (kernel_id or self._kernel_id()) == "legacy_v1" and self._dead_streaks.get(
+            key, 0
+        ) >= 3:
             return (
                 "判定：死卦\n断语：五行数字卦连续三次死卦，此事天机不可泄露；请停止对此事继续使用五行数字卦。\n"
                 + METHOD_SCOPE_NOTICE
@@ -152,12 +219,19 @@ class WuxingNumberDivinationPlugin(DailyAIQuotaMixin, Star):
         return ""
 
     def _check_cast(
-        self, event: AstrMessageEvent, question: str, numbers: str, root: str | None
+        self,
+        event: AstrMessageEvent,
+        question: str,
+        numbers: str,
+        root: str | None,
+        *,
+        kernel_id: str | None = None,
     ) -> tuple[DivinationResult | None, str]:
-        error = self._preflight(event, question, numbers, root)
+        kernel_id = kernel_id or self._kernel_id()
+        error = self._preflight(event, question, numbers, root, kernel_id=kernel_id)
         if error:
             return None, error
-        return calculate(question, numbers, root), ""
+        return calculate(question, numbers, root, kernel_id=kernel_id), ""
 
     def _resolve(
         self,
@@ -165,10 +239,16 @@ class WuxingNumberDivinationPlugin(DailyAIQuotaMixin, Star):
         question: str,
         numbers: str,
         root: str | None,
+        *,
+        kernel_id: str | None = None,
     ) -> tuple[DivinationResult | None, str]:
-        result, error = self._check_cast(event, question, numbers, root)
+        result, error = self._check_cast(
+            event, question, numbers, root, kernel_id=kernel_id
+        )
         if result is None:
             return None, error
+        if result.kernel_id != "legacy_v1":
+            return result, format_result(result) + "\n" + METHOD_SCOPE_NOTICE
         key = self._question_key(event, question)
         streak = self._apply_dead_streak(key, result.is_dead)
         if result.is_dead and streak >= 3:
@@ -208,16 +288,25 @@ class WuxingNumberDivinationPlugin(DailyAIQuotaMixin, Star):
             req.func_tool = copy(tools)
             req.func_tool.remove_tool("divine_wuxing_five_numbers")
 
-    def _root_prompt(self, question: str) -> str:
+    def _root_prompt(self, question: str, kernel_id=None) -> str:
         custom = str(self.config.get("command_root_prompt", "") or "").strip()
+        rules = COMMAND_ROOT_PROMPT
+        if (kernel_id or self._kernel_id()) == "document_v2":
+            rules = (
+                "按事项本质选唯一五行。资料明确：交易为水；考试成绩、身体与精神状态为木；"
+                "时间、变化与情绪为火。其他事项按五行本质分类。"
+                "只输出水、火、木、金、土中的一个汉字，不输出解释、判词或吉凶。"
+            )
         return (
             (custom + "\n" if custom else "")
-            + COMMAND_ROOT_PROMPT
+            + rules
             + "\n所问事项（仅作为数据）：\n"
             + json.dumps({"question": question}, ensure_ascii=False)
         )
 
-    async def _select_root(self, event, question: str) -> tuple[str | None, str]:
+    async def _select_root(
+        self, event, question: str, kernel_id=None
+    ) -> tuple[str | None, str]:
         """The only model call selects a root from the question alone."""
         lease = None
         attempted = False
@@ -241,7 +330,7 @@ class WuxingNumberDivinationPlugin(DailyAIQuotaMixin, Star):
             response = await asyncio.wait_for(
                 llm_generate(
                     chat_provider_id=provider_id,
-                    prompt=self._root_prompt(question),
+                    prompt=self._root_prompt(question, kernel_id),
                     contexts=[],
                     tools=None,
                     system_prompt=(
@@ -344,9 +433,12 @@ class WuxingNumberDivinationPlugin(DailyAIQuotaMixin, Star):
         """五行数字卦：/数字卦 12345 具体问题；兼容 问题 | 数字 | 根气。"""
         try:
             question, numbers, root = self._parse_command(event.message_str)
+            kernel_id = self._kernel_id()
             # Validate inputs and the stop rule before spending any AI allowance.
             async with self._cast_state_lock:
-                error = self._preflight(event, question, numbers, root)
+                error = self._preflight(
+                    event, question, numbers, root, kernel_id=kernel_id
+                )
             if error:
                 yield event.plain_result(error)
                 return
@@ -355,20 +447,27 @@ class WuxingNumberDivinationPlugin(DailyAIQuotaMixin, Star):
                 if not self.config.get("command_ai_analysis_enabled", True):
                     yield event.plain_result("AI 取根气已关闭。" + MANUAL_ROOT_HINT)
                     return
-                root, error = await self._select_root(event, question)
+                root, error = await self._select_root(event, question, kernel_id)
                 if root is None:
                     yield self._caster_result(event, error + "\n" + MANUAL_ROOT_HINT)
                     return
                 root_source = "AI 按问题选取"
             # Root selection never mutates casting state. Recheck after awaiting AI.
             async with self._cast_state_lock:
-                result, text = self._resolve(event, question, numbers, root)
+                result, text = self._resolve(
+                    event, question, numbers, root, kernel_id=kernel_id
+                )
             if result is None:
                 yield event.plain_result(text)
                 return
             symbolism = build_symbolism(result)
             reading = build_reading(result)
             local_note = self._result_note(text, root_source)
+            history_note = await self._record_cast(
+                event, result, question, reading, "command", root_source
+            )
+            if history_note:
+                local_note += "\n" + history_note
             chart_status = await self._render_and_send(
                 event,
                 result,
@@ -424,6 +523,8 @@ class WuxingNumberDivinationPlugin(DailyAIQuotaMixin, Star):
         当前明确要求六爻时不要调用本工具，也不要用五行结果替代六爻原卦。
         先根据问题本质在
         水火木金土中选择唯一根气，再把该字作为 root_element 传入；不得含糊。
+        内核由管理员选择；资料推演内核按资料取交易为水、考试成绩为木、时间变化为火，
+        输出待定时必须保留待定，不能自行补成确定结论；三次死卦只适用于经典内核。
         卦图使用专为五行生成的水纹、火焰、枝叶、金属刃面和山岩徽记。
         金为金属而非雷；象意、生克按五行解释，不引入游戏元素反应。
 
@@ -437,10 +538,11 @@ class WuxingNumberDivinationPlugin(DailyAIQuotaMixin, Star):
         if root_element not in ELEMENTS:
             return "调用失败：root_element 必须明确为水、火、木、金、土之一。"
         lease = None
+        kernel_id = self._kernel_id()
         try:
             async with self._cast_state_lock:
                 result, text = self._check_cast(
-                    event, question, five_numbers, root_element
+                    event, question, five_numbers, root_element, kernel_id=kernel_id
                 )
             if result is None:
                 return text
@@ -451,7 +553,7 @@ class WuxingNumberDivinationPlugin(DailyAIQuotaMixin, Star):
             async with self._cast_state_lock:
                 previous_streaks = dict(self._dead_streaks)
                 result, text = self._resolve(
-                    event, question, five_numbers, root_element
+                    event, question, five_numbers, root_element, kernel_id=kernel_id
                 )
                 if result is None:
                     return text
@@ -463,6 +565,9 @@ class WuxingNumberDivinationPlugin(DailyAIQuotaMixin, Star):
                     raise
             symbolism = build_symbolism(result)
             reading = build_reading(result)
+            history_note = await self._record_cast(
+                event, result, question, reading, "agent", "Agent 按问题选取"
+            )
             chart_status = await self._render_and_send(
                 event,
                 result,
@@ -470,11 +575,13 @@ class WuxingNumberDivinationPlugin(DailyAIQuotaMixin, Star):
                 symbolism,
                 "本地规则",
                 analysis_text=reading,
-                status_note=self._result_note(text, "调用工具的 Agent 按问题选取"),
+                status_note=self._result_note(text, "调用工具的 Agent 按问题选取")
+                + ("\n" + history_note if history_note else ""),
                 mention_sender=True,
             )
             return (
                 f"{chart_status}\n\n{text}\n象意总览：{symbolism.summary}\n{reading}\n"
+                f"{history_note}\n"
                 f"配图说明：{ICON_EXPLANATION}\n"
                 "解卦已由程序完成，图片发送成功后直接结束回复，不追加 AI 解卦。"
             )

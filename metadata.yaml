@@ -1,6 +1,6 @@
 name: wuxing_num
 display_name: 五行数字卦
-desc: 五行数字卦，AI 只取根气，程序解卦并合成山水光效结果图；不干涉六爻起卦。
-version: v1.7.0
+desc: 双内核五行数字卦，支持逐轮推演、配置页起卦预览与 AI 测试、调用排行和 JSON 卦例导出。
+version: v2.0.0
 author: haxif
 repo: ""

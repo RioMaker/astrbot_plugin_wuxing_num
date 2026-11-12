@@ -1,4 +1,18 @@
 {
+  "kernel_id": {
+    "type": "string",
+    "description": "当前计算内核",
+    "default": "legacy_v1",
+    "options": ["legacy_v1", "document_v2"],
+    "hint": "legacy_v1 为原有环形计分；document_v2 为资料推演，支持补齐、阴阳变化和逐轮过程。资料未明确的组合输出待定。可在数字卦管理页面切换。"
+  },
+  "page_provider_id": {
+    "type": "string",
+    "description": "后台测试 AI 解读模型",
+    "default": "",
+    "_special": "select_provider",
+    "hint": "仅后台勾选含 AI 解析时使用；留空使用下方取根气模型 ID。后台测试不使用群成员配额，会实际请求此模型。"
+  },
   "llm_tool_enabled": {
     "type": "bool",
     "description": "允许 LLM 调用数字卦插件能力",

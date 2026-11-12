@@ -2,28 +2,52 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import re
-
+from dataclasses import dataclass
 
 ELEMENTS = ("水", "火", "木", "金", "土")
 DIGIT_ELEMENT = {
-    "1": "水", "6": "水",
-    "2": "火", "7": "火",
-    "3": "木", "8": "木",
-    "4": "金", "9": "金",
-    "5": "土", "0": "土",
+    "1": "水",
+    "6": "水",
+    "2": "火",
+    "7": "火",
+    "3": "木",
+    "8": "木",
+    "4": "金",
+    "9": "金",
+    "5": "土",
+    "0": "土",
 }
-DIGIT_YIN_YANG = {
-    digit: ("阳" if int(digit) % 2 else "阴")
-    for digit in "0123456789"
-}
+DIGIT_YIN_YANG = {digit: ("阳" if int(digit) % 2 else "阴") for digit in "0123456789"}
 GENERATES = {"水": "木", "木": "火", "火": "土", "土": "金", "金": "水"}
 CONTROLS = {"水": "火", "火": "金", "金": "木", "木": "土", "土": "水"}
 
 ROOT_KEYWORDS = {
-    "金": ("钱", "财", "收入", "工资", "合同", "签约", "官司", "诉讼", "决定", "交易", "投资"),
-    "木": ("学业", "学习", "考试", "升学", "成长", "求职", "工作", "事业", "晋升", "计划"),
+    "金": (
+        "钱",
+        "财",
+        "收入",
+        "工资",
+        "合同",
+        "签约",
+        "官司",
+        "诉讼",
+        "决定",
+        "交易",
+        "投资",
+    ),
+    "木": (
+        "学业",
+        "学习",
+        "考试",
+        "升学",
+        "成长",
+        "求职",
+        "工作",
+        "事业",
+        "晋升",
+        "计划",
+    ),
     "水": ("出行", "旅行", "搬迁", "物流", "消息", "沟通", "寻找", "远方", "流动"),
     "火": ("感情", "恋爱", "婚姻", "表白", "名气", "名声", "传播", "发布", "比赛"),
     "土": ("房", "家庭", "健康", "疾病", "稳定", "土地", "店铺", "居住", "安定"),
@@ -49,6 +73,9 @@ class DivinationResult:
     transitions: tuple[Transition, ...]
     score: int
     dead_reason: str = ""
+    kernel_id: str = "legacy_v1"
+    kernel_version: str = "1.0"
+    details: dict | None = None
 
     @property
     def is_dead(self) -> bool:
@@ -107,7 +134,9 @@ def relation(source: str, target: str) -> Transition:
     return Transition(source, target, "受克阻断", -2, False)
 
 
-def calculate(question: str, numbers: str, root_element: str | None = None) -> DivinationResult:
+def calculate(
+    question: str, numbers: str, root_element: str | None = None
+) -> DivinationResult:
     digits = parse_five_digits(numbers)
     root = (root_element or infer_root(question)).strip()
     if root not in ELEMENTS:
@@ -125,8 +154,14 @@ def calculate(question: str, numbers: str, root_element: str | None = None) -> D
 
     if not root_indexes:
         return DivinationResult(
-            "死卦", "死卦：所问根气不现，请重新起五个数字。", root, digits,
-            elements, transitions, score, "根气不现",
+            "死卦",
+            "死卦：所问根气不现，请重新起五个数字。",
+            root,
+            digits,
+            elements,
+            transitions,
+            score,
+            "根气不现",
         )
 
     root_open = any(
@@ -135,8 +170,14 @@ def calculate(question: str, numbers: str, root_element: str | None = None) -> D
     )
     if not root_open or (flowing_edges == 0 and hard_blocks >= 2):
         return DivinationResult(
-            "死卦", "死卦：根气被截，五行不流通，请重新起五个数字。", root, digits,
-            elements, transitions, score, "根气被截",
+            "死卦",
+            "死卦：根气被截，五行不流通，请重新起五个数字。",
+            root,
+            digits,
+            elements,
+            transitions,
+            score,
+            "根气被截",
         )
 
     success = score >= 3 and flowing_edges >= 3 and hard_blocks <= 1
@@ -147,22 +188,42 @@ def calculate(question: str, numbers: str, root_element: str | None = None) -> D
         phrase = "败：根气虽现但流转受阻，气不能成局，此事不成。"
         verdict = "败"
     return DivinationResult(
-        verdict, phrase, root, digits, elements, transitions, score,
+        verdict,
+        phrase,
+        root,
+        digits,
+        elements,
+        transitions,
+        score,
     )
 
 
 def format_result(result: DivinationResult) -> str:
+    if result.kernel_id == "document_v2":
+        details = result.details or {}
+        return "\n".join(
+            (
+                f"内核：资料推演 v2（{result.kernel_version}）",
+                f"数字：{' '.join(result.digits)}",
+                f"事项五行：{result.root}",
+                "推演余象：" + "、".join(details.get("final", [])),
+                "结合事项：" + " → ".join(details.get("combined", [])),
+                f"判定：{result.verdict}",
+                f"断语：{result.phrase}",
+            )
+        )
     yin_yang, yin_yang_state = yin_yang_summary(result.digits)
     paths = "；".join(
         f"{item.source}→{item.target}（{item.name}）" for item in result.transitions
     )
-    return "\n".join((
-        f"数字：{' '.join(result.digits)}",
-        f"阴阳：{' → '.join(yin_yang)}；{yin_yang_state}",
-        f"五行：{' → '.join(result.elements)} → {result.elements[0]}",
-        f"根气：{result.root}",
-        f"流转：{paths}",
-        f"判定：{result.verdict}",
-        f"断语：{result.phrase}",
-    ))
-
+    return "\n".join(
+        (
+            f"数字：{' '.join(result.digits)}",
+            f"阴阳：{' → '.join(yin_yang)}；{yin_yang_state}",
+            f"五行：{' → '.join(result.elements)} → {result.elements[0]}",
+            f"根气：{result.root}",
+            f"流转：{paths}",
+            f"判定：{result.verdict}",
+            f"断语：{result.phrase}",
+        )
+    )

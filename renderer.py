@@ -66,6 +66,7 @@ VERDICT_STYLE = {
     "成": (GOLD, "#142722"),
     "败": ("#E6A1A0", "#2C1E24"),
     "死卦": ("#B5BBD3", "#1D2230"),
+    "待定": ("#B5BBD3", "#1D2230"),
 }
 BUNDLED_FONT_PATH = (
     Path(__file__).resolve().parent / "assets/fonts/NotoSansCJKsc-Regular.otf"
@@ -149,7 +150,7 @@ class WuxingChartRenderer:
             canvas = extended
         draw = ImageDraw.Draw(canvas)
         self._header(draw, result, f)
-        self._question(draw, question, matter_type, f)
+        self._question(draw, question, matter_type, f, result.kernel_id)
         self._cycle(canvas, draw, result, meanings, f)
         soft_halo(
             canvas,
@@ -246,7 +247,8 @@ class WuxingChartRenderer:
         draw.text((720, 92), TITLE, font=f["title"], fill=GOLD, anchor="mm")
         draw.text(
             (1376, 62),
-            f"根气 · {result.root}",
+            ("事项" if result.kernel_id == "document_v2" else "根气")
+            + f" · {result.root}",
             font=f["small"],
             fill=MUTED,
             anchor="rt",
@@ -259,7 +261,7 @@ class WuxingChartRenderer:
             anchor="rt",
         )
 
-    def _question(self, draw, question, matter_type, f):
+    def _question(self, draw, question, matter_type, f, kernel_id="legacy_v1"):
         lines, font = self._fit(
             draw, self._clean(question) or "未填写", 1220, 2, 36, 26
         )
@@ -273,7 +275,9 @@ class WuxingChartRenderer:
         )
         draw.text(
             (1376, 248),
-            "按输入顺序 · 顺时针流转",
+            "原始五位 · 逐轮推演见下方"
+            if kernel_id == "document_v2"
+            else "按输入顺序 · 顺时针流转",
             font=f["tiny"],
             fill=MUTED,
             anchor="rt",
@@ -317,19 +321,28 @@ class WuxingChartRenderer:
                 yin_yang[i],
                 result.elements[i],
                 meanings[i],
-                result.elements[i] == result.root,
+                result.elements[i] == result.root and result.kernel_id == "legacy_v1",
                 f,
                 energy=0.2 if result.is_dead else 1.0,
             )
-        draw.text((720, 790), "所 问 根 气", font=f["small"], fill=INK, anchor="mm")
+        draw.text(
+            (720, 790),
+            "事 项 五 行" if result.kernel_id == "document_v2" else "所 问 根 气",
+            font=f["small"],
+            fill=INK,
+            anchor="mm",
+        )
         root_color = MUTED if result.is_dead else ELEMENT_STYLE[result.root]["accent"]
         draw.text(
             (720, 885), result.root, font=self._font(126), fill=root_color, anchor="mm"
         )
+        caption, caption_font = self._fit(
+            draw, self._root_caption(result), 510, 1, 24, 18
+        )
         draw.text(
             (720, 992),
-            self._root_caption(result),
-            font=f["small"],
+            caption[0],
+            font=caption_font,
             fill=INK,
             anchor="mm",
         )
@@ -346,6 +359,8 @@ class WuxingChartRenderer:
 
     @staticmethod
     def _root_caption(result):
+        if result.kernel_id == "document_v2":
+            return "余象：" + "、".join((result.details or {}).get("final", []))
         if result.is_dead:
             return result.dead_reason or "卦象未立"
         return "根气可通 · 成局" if result.verdict == "成" else "根气可辨 · 成局不足"
@@ -472,7 +487,9 @@ class WuxingChartRenderer:
     def _interpretation(self, draw, result, summary, f):
         draw.line((64, 1476, 1376, 1476), fill="#827A66", width=1)
         color, _ = VERDICT_STYLE[result.verdict]
-        verdict_font = self._font(76) if result.is_dead else f["verdict"]
+        verdict_font = (
+            self._font(76) if result.verdict in ("死卦", "待定") else f["verdict"]
+        )
         draw.text(
             (204, 1600), result.verdict, font=verdict_font, fill=color, anchor="mm"
         )
@@ -482,7 +499,14 @@ class WuxingChartRenderer:
             "成": "根气可通，流转成局",
             "败": "成局不足，此事不成",
             "死卦": "卦象未立，请重新起卦",
+            "待定": "资料规则待补充，请复核过程",
         }[result.verdict]
+        if result.kernel_id == "document_v2":
+            heading = {
+                "成": "资料推演 · 结合事项为生相",
+                "败": "资料推演 · 克相，短期难实现",
+                "待定": "资料推演 · 当前规则不足",
+            }[result.verdict]
         draw.text((386, 1520), heading, font=f["body"], fill=color, anchor="lt")
         # Fixed engine verdict is always distinct from model-generated symbolism.
         lines, font = self._fit(draw, result.phrase, 970, 2, 34, 26)

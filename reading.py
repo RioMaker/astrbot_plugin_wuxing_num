@@ -18,6 +18,28 @@ class Symbolism:
 
 
 def build_symbolism(result: DivinationResult) -> Symbolism:
+    if result.kernel_id == "document_v2":
+        try:
+            from .engine_v2 import YANG_MEANINGS, YIN_MEANINGS
+        except ImportError:
+            from engine_v2 import YANG_MEANINGS, YIN_MEANINGS
+        meanings = tuple(
+            ("阴" if int(d) % 2 == 0 else "阳")
+            + e
+            + "："
+            + (YIN_MEANINGS if int(d) % 2 == 0 else YANG_MEANINGS).get(
+                e, "原始五行，详见推演"
+            )
+            for d, e in zip(result.digits, result.elements)
+        )
+        return Symbolism(
+            "事项五行 · " + result.root,
+            meanings,
+            "余象："
+            + "、".join((result.details or {}).get("final", []))
+            + "；"
+            + result.phrase,
+        )
     types = {
         "水": "流动消息",
         "火": "情感名望",
@@ -46,6 +68,28 @@ def build_symbolism(result: DivinationResult) -> Symbolism:
 
 def build_reading(result: DivinationResult) -> str:
     """Describe actual positions and thresholds, without adding prediction rules."""
+    if result.kernel_id == "document_v2":
+        details = result.details or {}
+        parts = [f"资料推演 v2 · 规则版本 {result.kernel_version}"]
+        for i, step in enumerate(details.get("steps", [])):
+            parts.append(f"{i + 1}. {step['action']}：{'、'.join(step['state'])}。")
+        parts.append("结合事项：" + " → ".join(details.get("combined", [])))
+        parts.append("断语：" + result.phrase)
+        parts.extend("待复核：" + note for note in details.get("notices", []))
+        timing = details.get("timing")
+        if timing:
+            parts.append(
+                "案例补数："
+                + "+".join(str(s[1]) for s in timing["supplements"])
+                + f"={timing['completion']}；起始数{timing['start']}，达成数{timing['completion']}，单位未定。"
+            )
+            parts.append(timing["note"])
+        else:
+            parts.append("应期：该组合的通用补数规则尚待补充，不自动推断日期。")
+        parts.append(
+            "实现约定：多目标取从左到右首个；无阴克阳时尝试从右到左阴生阴；余两项停止。完整约定见配置页。"
+        )
+        return "\n".join(parts)
     roots = [i for i, element in enumerate(result.elements) if element == result.root]
     flowing = sum(item.flowing for item in result.transitions)
     blocks = sum(item.name == "受克阻断" for item in result.transitions)
