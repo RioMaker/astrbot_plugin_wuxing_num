@@ -1,6 +1,6 @@
 name: wuxing_num
 display_name: 五行数字卦
 desc: 双内核五行数字卦，支持逐轮推演、配置页起卦预览与 AI 测试、调用排行和 JSON 卦例导出。
-version: v2.1.0
+version: v2.2.0
 author: haxif
 repo: ""

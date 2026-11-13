@@ -14,9 +14,9 @@ from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile
 
 if __package__:
-    from .token_usage import merge_usage
+    from .token_usage import case_token_summary, merge_usage
 else:
-    from token_usage import merge_usage
+    from token_usage import case_token_summary, merge_usage
 
 BEIJING = timezone(timedelta(hours=8))
 _STORE_LOCKS: dict[str, threading.RLock] = {}
@@ -93,8 +93,11 @@ Agent 在插件外选择根气，工具内没有模型请求；外部对话可�
 
 ## 计数口径与恢复
 
-群、个人排行按已保存的正式卦例次数降序排列，包括死卦；不计拒绝的输入、未起卦的 AI 失败或后台测试。
+群、个人排行默认按已保存的正式卦例次数降序排列，也可按已知累计 Token 降序；包括死卦，不计拒绝的输入、未起卦的 AI 失败或后台测试。
 个人按平台实例和账号合并各群次数；群按平台实例和群号汇总。后台测试单独显示。
+Token 累计优先取每卦已知总量；单卦总量未知时仍累计明细中已知的总量，不把汇总和明细重复相加，不再加缓存命中。
+包含未知/未记录用量时，累计数仅为已知下限，页面显示 ≥ 及对应卦例数；全部未知时显示未知，不伪装成 0。
+按 Token 排序使用已知累计量，无任何已知用量的群/用户排末尾；同量先按调用次数，再按平台和标识排序。排序在全部数据上完成后分页。
 只有启用本版本后生成的卦例才能入库，旧版每日额度不是历史卦例，不能还原旧排行。
 同分按标识排序。页面查看和历史图片预览不计次，不调用 AI。
 
@@ -191,7 +194,9 @@ class CaseStore:
                 "records": rows[start : start + limit],
             }
 
-    def stats(self, *, page=1, limit=50):
+    def stats(self, *, page=1, limit=50, sort="count"):
+        if sort not in ("count", "tokens"):
+            raise ValueError("排行排序方式无效")
         with self._lock:
             data = self._read()
         groups, users = {}, {}
@@ -199,6 +204,7 @@ class CaseStore:
         official = [r for r in data["records"] if r["source"] != "page_test"]
         for r in official:
             kernels[r["kernel"]] += 1
+            token_summary = case_token_summary(r)
             identities = [(users, (r["platform"], r["user_id"]), r["user_name"])]
             if r["group_id"]:
                 identities.append(
@@ -213,17 +219,27 @@ class CaseStore:
                         "name": name,
                         "count": 0,
                         "ai_count": 0,
+                        "total_tokens": 0,
+                        "token_known_cases": 0,
+                        "token_unknown_cases": 0,
+                        "token_unrecorded_cases": 0,
                     },
                 )
                 item["count"] += 1
                 item["ai_count"] += int(bool(r.get("ai_used")))
+                for field, value in token_summary.items():
+                    item[field] += value
                 if name:
                     item["name"] = name
 
         def ranked(mapping):
-            rows = sorted(
-                mapping.values(), key=lambda r: (-r["count"], r["platform"], r["id"])
-            )
+            def order(row):
+                tie = (-row["count"], row["platform"], row["id"])
+                if sort == "tokens":
+                    return (-bool(row["token_known_cases"]), -row["total_tokens"], *tie)
+                return tie
+
+            rows = sorted(mapping.values(), key=order)
             for i, row in enumerate(rows, 1):
                 row["rank"] = i
             return rows[(page - 1) * limit : page * limit]
@@ -240,6 +256,7 @@ class CaseStore:
             "user_total": len(users),
             "page": page,
             "limit": limit,
+            "sort": sort,
         }
 
     def export(self, directory):

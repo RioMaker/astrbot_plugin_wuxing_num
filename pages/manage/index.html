@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>五行数字卦管理</title><link rel="stylesheet" href="./style.css">
+  <title>五行数字卦管理</title><link rel="stylesheet" href="./style.css?v=2.2.0-r1">
 </head>
 <body>
   <div class="shell">
@@ -44,10 +44,12 @@
     </section>
 
     <section id="tab-stats" class="tab" hidden>
-      <div class="section-heading"><div><p class="eyebrow">03 / ACTIVITY</p><h2>调用排行</h2><p class="muted">按已生成并保存的正式卦例次数降序排列，包含死卦；后台测试单独统计。</p></div><button class="secondary" id="refresh-stats">刷新排行</button></div>
+      <div class="section-heading"><div><p class="eyebrow">03 / ACTIVITY</p><h2>调用排行</h2><p class="muted">汇总正式卦例的调用次数与累计 Token，包含死卦；后台测试单独统计。</p></div><button class="secondary" id="refresh-stats">刷新排行</button></div>
       <div class="metrics"><div><small>正式起卦</small><strong id="stat-total">—</strong></div><div><small>使用过 AI</small><strong id="stat-ai">—</strong></div><div><small>覆盖群 / 问卦人</small><strong id="stat-scope">—</strong></div><div><small>后台测试</small><strong id="stat-tests">—</strong></div></div>
       <p id="stats-since" class="hint">历史统计从本版本记录启用后开始，旧每日额度不能还原历史次数。</p>
-      <div class="rank-grid"><div class="panel"><h3>群排行</h3><div class="table-scroll"><table><thead><tr><th>排名</th><th>群 / 平台</th><th>次数</th><th>含 AI</th></tr></thead><tbody id="group-ranks"></tbody></table></div></div><div class="panel"><h3>个人排行</h3><div class="table-scroll"><table><thead><tr><th>排名</th><th>问卦人 / 平台</th><th>次数</th><th>含 AI</th></tr></thead><tbody id="user-ranks"></tbody></table></div></div></div>
+      <div class="toolbar"><label>排行排序<select id="stats-sort"><option value="count">调用次数 · 从高到低</option><option value="tokens">Token 消耗 · 从高到低</option></select></label></div>
+      <p class="hint">Token 按已记录的用量累计；“≥”表示还有用量未知或未记录的卦例。按 Token 排序时，全部未知的条目排在末尾。</p>
+      <div class="rank-grid"><div class="panel"><h3>群排行</h3><div class="table-scroll"><table><thead><tr><th>排名</th><th>群 / 平台</th><th>次数</th><th>含 AI</th><th>累计 Token</th></tr></thead><tbody id="group-ranks"></tbody></table></div></div><div class="panel"><h3>个人排行</h3><div class="table-scroll"><table><thead><tr><th>排名</th><th>问卦人 / 平台</th><th>次数</th><th>含 AI</th><th>累计 Token</th></tr></thead><tbody id="user-ranks"></tbody></table></div></div></div>
       <div class="pager"><button class="secondary" id="stats-prev">上一页</button><span id="stats-page">第 1 页</span><button class="secondary" id="stats-next">下一页</button></div>
     </section>
 
@@ -58,6 +60,6 @@
       <div class="pager"><button class="secondary" id="history-prev">上一页</button><span id="history-page">第 1 页</span><button class="secondary" id="history-next">下一页</button></div>
       <dialog id="history-dialog"><div class="preview-heading"><h3>卦例详情</h3><button id="close-dialog" class="secondary">关闭</button></div><p id="history-detail-meta" class="muted"></p><h4>Token 用量</h4><pre id="history-detail-tokens"></pre><pre id="history-detail-reading"></pre><h4>AI 解读</h4><pre id="history-detail-ai"></pre><p id="history-image-warning" class="hint"></p><img id="history-chart" class="chart" alt="历史数字卦预览"></dialog>
     </section>
-    <footer>五行数字卦 · v2.1 <span>每个结果，都保留来路。</span></footer>
-  </div><script type="module" src="./app.js"></script>
+    <footer>五行数字卦 · v2.2 <span>每个结果，都保留来路。</span></footer>
+  </div><script type="module" src="./app.js?v=2.2.0"></script>
 </body></html>

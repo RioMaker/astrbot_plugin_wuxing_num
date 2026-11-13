@@ -103,15 +103,19 @@ $('test-form').addEventListener('submit', event => {
   }, '正在起卦…');
 });
 function rankRows(target, rows, label) {
-  if (!rows.length) { const tr = document.createElement('tr'), td = textNode('td',`暂无${label}记录`,'muted'); td.colSpan = 4; tr.append(td); $(target).replaceChildren(tr); return; }
+  if (!rows.length) { const tr = document.createElement('tr'), td = textNode('td',`暂无${label}记录`,'muted'); td.colSpan = 5; tr.append(td); $(target).replaceChildren(tr); return; }
   $(target).replaceChildren(...rows.map(row => {
     const tr = document.createElement('tr'), who = document.createElement('td');
     who.append(textNode('span',row.name || row.id),textNode('small',`${row.id} · ${row.platform}`));
-    tr.append(textNode('td',row.rank),who,textNode('td',row.count),textNode('td',row.ai_count)); return tr;
+    const missing = row.token_unknown_cases + row.token_unrecorded_cases;
+    const tokens = textNode('td', row.token_known_cases ? `${missing ? '≥ ' : ''}${tokenNumber(row.total_tokens)}` : '未知', 'rank-tokens');
+    if (row.token_unknown_cases) tokens.append(textNode('small',`${row.token_unknown_cases} 卦用量未知`));
+    if (row.token_unrecorded_cases) tokens.append(textNode('small',`${row.token_unrecorded_cases} 卦未记录`));
+    tr.append(textNode('td',row.rank),who,textNode('td',row.count),textNode('td',row.ai_count),tokens); return tr;
   }));
 }
 async function refreshStats() {
-  const version = ++statsVersion, data = await bridge.apiGet('stats',{page:statsPage,limit:30});
+  const version = ++statsVersion, data = await bridge.apiGet('stats',{page:statsPage,limit:30,sort:$('stats-sort').value});
   if (version !== statsVersion) return;
   $('stat-total').textContent = data.total; $('stat-ai').textContent = data.ai_total;
   $('stat-scope').textContent = `${data.group_total} / ${data.user_total}`; $('stat-tests').textContent = data.test_total;
@@ -157,6 +161,7 @@ async function refreshHistory() {
 }
 for (const [id,action] of [['refresh-stats',refreshStats],['refresh-history',refreshHistory]]) $(id).addEventListener('click', e => busy(e.currentTarget,action));
 for (const [id,delta] of [['stats-prev',-1],['stats-next',1]]) $(id).addEventListener('click',() => {statsPage += delta; refreshStats().catch(e => notify(e.message,'error'));});
+$('stats-sort').addEventListener('change',() => {statsPage=1; refreshStats().catch(e => notify(e.message,'error'));});
 for (const [id,delta] of [['history-prev',-1],['history-next',1]]) $(id).addEventListener('click',() => {historyPage += delta; refreshHistory().catch(e => notify(e.message,'error'));});
 $('history-source').addEventListener('change',() => {historyPage=1; refreshHistory().catch(e => notify(e.message,'error'));});
 $('export-all').addEventListener('click', e => busy(e.currentTarget,async () => {await bridge.download('export',{},'数字卦卦例库.zip'); notify('全部卦例已导出：JSON 存储文件与 Markdown 字段说明。','success');},'正在导出…'));

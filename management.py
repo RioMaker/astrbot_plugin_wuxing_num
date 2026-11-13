@@ -209,7 +209,10 @@ class ManagementMixin:
     async def page_stats(self, payload, **kwargs):
         page, limit = self._page_pagination(payload, 50)
         return await asyncio.to_thread(
-            self._get_case_store().stats, page=page, limit=limit
+            self._get_case_store().stats,
+            page=page,
+            limit=limit,
+            sort=payload.get("sort", "count"),
         )
 
     async def page_history(self, payload, **kwargs):

@@ -154,3 +154,37 @@ def merge_usage(previous, incoming):
         else "unknown"
     )
     return deepcopy({"status": status, **values, "calls": calls})
+
+
+def case_token_summary(record):
+    """Known total for ranking, with incomplete cases kept visible separately."""
+    summary = {
+        "total_tokens": 0,
+        "token_known_cases": 0,
+        "token_unknown_cases": 0,
+        "token_unrecorded_cases": 0,
+    }
+    usage = record.get("token_usage")
+    if not isinstance(usage, Mapping):
+        summary["token_unrecorded_cases"] = 1
+        return summary
+    total = _count(usage, "total_tokens")
+    if total is not None:
+        summary.update(total_tokens=total, token_known_cases=1)
+        return summary
+    # A merged case may have measured calls even though its overall total is
+    # unknown. Sum those calls once, without adding the case aggregate again.
+    summary["token_unknown_cases"] = 1
+    calls, seen = usage.get("calls"), set()
+    if isinstance(calls, list):
+        for call in calls:
+            identity = _field(call, "id")
+            if isinstance(identity, str) and identity:
+                if identity in seen:
+                    continue
+                seen.add(identity)
+            total = _count(call, "total_tokens")
+            if total is not None:
+                summary["total_tokens"] += total
+                summary["token_known_cases"] = 1
+    return summary

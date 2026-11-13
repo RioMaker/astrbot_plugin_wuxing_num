@@ -46,6 +46,9 @@ async function call(path,method,data){
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, default=8766)
+    parser.add_argument(
+        "--rank-samples", action="store_true", help="Seed simulated token ranking cases"
+    )
     args = parser.parse_args()
     sandbox = Path(tempfile.mkdtemp(prefix="wuxing-page-preview-"))
     module = _load_main_module()
@@ -81,6 +84,67 @@ def main():
     threading.Thread(target=loop.run_forever, daemon=True).start()
 
     async def seed():
+        if args.rank_samples:
+            # Deliberately different count/token orders; all identities and usage
+            # are synthetic and confined to this preview's temporary directory.
+            samples = (
+                [(0, 0, 0)] * 5
+                + [
+                    (1, 1, 24000),
+                    (2, 2, 8000),
+                    (1, 2, 3000),
+                    (1, 1, None),
+                    (2, 2, "old"),
+                ]
+                + [(3, 3, None)] * 4
+                + [(4, 4, "old")] * 2
+            )
+            result = module.calculate(
+                "模拟排行验收事项能否达成", "15997", "水", kernel_id="document_v2"
+            )
+            for i, (user, group, total) in enumerate(samples):
+                identity = {
+                    "id": f"{i:024x}",
+                    "source": "command",
+                    "platform": "offline-preview",
+                    "user_id": str(10000 + user),
+                    "user_name": f"模拟问卦人 {user}",
+                    "group_id": str(20000 + group),
+                    "group_name": f"模拟群 {group}",
+                    "ai_used": total != 0,
+                    "ai_status": "not_requested",
+                    "ai_interpretation": "",
+                    "ai_error": "",
+                    "root_source": "手动指定" if total == 0 else "AI 按问题选取",
+                }
+                if total != "old":
+                    identity["token_usage"] = module.usage_snapshot(
+                        scope="agent_context"
+                        if total is None
+                        else "local"
+                        if total == 0
+                        else "root_selection",
+                        response=types.SimpleNamespace(
+                            usage={
+                                "input_tokens": total - 100,
+                                "output_tokens": 100,
+                                "total_tokens": total,
+                            }
+                        )
+                        if total
+                        else None,
+                        provider_id="offline-preview-model" if total else "",
+                    )
+                await asyncio.to_thread(
+                    plugin._get_case_store().add,
+                    plugin._case_record(
+                        result,
+                        "模拟排行验收事项能否达成",
+                        module.build_reading(result),
+                        identity,
+                    ),
+                )
+            return
         for i in range(25):
             event = _Event(
                 sender_id=str(10000 + i % 4),
@@ -123,8 +187,9 @@ def main():
             if path in ("/", "/index.html"):
                 html = (ROOT / "pages/manage/index.html").read_text("utf-8")
                 html = html.replace(
-                    '<script type="module" src="./app.js">',
-                    '<script src="/__preview_bridge.js"></script><script type="module" src="./app.js">',
+                    '<script type="module"',
+                    '<script src="/__preview_bridge.js"></script><script type="module"',
+                    1,
                 )
                 return self.send_content(html.encode(), "text/html; charset=utf-8")
             return super().do_GET()

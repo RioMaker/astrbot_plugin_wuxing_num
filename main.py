@@ -49,7 +49,7 @@ MANUAL_ROOT_HINT = (
     PLUGIN_NAME,
     "haxif",
     "以五个数字判断五行流转并生成山水光效象意卦图；只响应专用命令或专用 Agent 工具。",
-    "2.1.0",
+    "2.2.0",
 )
 class WuxingNumberDivinationPlugin(ManagementMixin, DailyAIQuotaMixin, Star):
     AI_DAILY_LABEL = "五行数字卦"
