@@ -27,6 +27,16 @@
 
 ## 精简存储与导出
 
+从 v2.1.0 起，每个新卦例保存 `token_usage`：输入、输出、缓存命中、总 Token 和精简计量明细。历史列表显示总量，详情及测试结果可展开查看各项；导出 JSON 与 Markdown 字段说明一并包含这些信息。
+
+- 指令记录 AI 取根气响应中的实际 usage；后台测试记录 AI 解读响应中的实际 usage。接口报告总量优先；只在输入和输出均已知时相加，缓存命中是输入的子集。
+- 纯本地或模型未配置、没有发起请求时为 0。超时、无 usage 或字段缺失保留未知，空解读但已返回 usage 时仍保存 Token。旧记录保持原样，页面显示未记录，不补成 0。
+- Agent 在插件外生成根气，工具内不再调用模型。公开响应钩子不提供可准确归属此卦的取根气请求消耗，标记 `external`；不计入整段对话或其他工具消耗。
+- 同一消息的相同卦例仍去重计一次起卦；若真实重复调用模型，各次用量按计量 ID 去重保存并累加。任何明细某项未知时该汇总项为未知，已知部分保留在明细中。
+- 用量不是金额账单，不包括供应商未报告的重试或主 Agent 其他轮次。查看历史、预览或导出不会增加 Token 或额度。
+
+接口核对：[AstrBot TokenUsage / LLMResponse](https://github.com/AstrBotDevs/AstrBot/blob/master/astrbot/core/provider/entities.py)、[公开事件钩子](https://docs.astrbot.app/dev/star/guides/listen-message-event.html)、[Agent 工具循环](https://github.com/AstrBotDevs/AstrBot/blob/master/astrbot/core/agent/runners/tool_loop_agent_runner.py)。只保存数值和提供商 ID，不保存密钥、请求体或原始模型响应。
+
 卦例统一存于 `data/plugin_data/wuxing_num/cases.json`，UTF-8 JSON，紧凑序列化，原子替换写入。只存文字与结果快照，不保存 PNG、聊天历史、密钥或重复的五位关系表。不自动删除历史，全部卦例均可导出。文件损坏时停止写入并报错，不用空文件覆盖损坏数据。
 
 “导出所有卦例”下载 ZIP，包含：

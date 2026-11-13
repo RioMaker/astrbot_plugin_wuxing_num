@@ -13,6 +13,11 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile
 
+if __package__:
+    from .token_usage import merge_usage
+else:
+    from token_usage import merge_usage
+
 BEIJING = timezone(timedelta(hours=8))
 _STORE_LOCKS: dict[str, threading.RLock] = {}
 _REGISTRY_LOCK = threading.Lock()
@@ -65,6 +70,26 @@ cases.json 是可独立读取的 UTF-8 JSON 存储文件。ZIP 不包含图片�
 | ai_status | not_requested 未请求解读、success 解读成功、failed 解读失败；取根气不等于解读 |
 | ai_interpretation | AI 解读原文；没有则为空，不伪造解读 |
 | ai_error | 解读失败的简短状态，不保存模型密钥或请求体 |
+| token_usage | 可选 Token 用量对象；旧记录缺省表示未记录，不能当作 0 |
+| token_usage.status | reported 已返回输入/输出/总量；partial 仅有部分用量；unknown 未知；external 外部 Agent 无法归属；not_used 未请求模型 |
+| token_usage.input_tokens | 输入 Token，包含缓存输入；未知为 null |
+| token_usage.output_tokens | 输出 Token，包含接口已报告的思考 Token；未知为 null |
+| token_usage.cached_tokens | 缓存命中的输入 Token，是 input_tokens 的子集，不再加到总量；未报告为 null |
+| token_usage.total_tokens | 总 Token；优先保留接口报告，缺省时仅由已知输入与输出相加；未知为 null |
+| token_usage.calls | 精简计量明细；同一卦例重复触发真实模型请求时保留各次用量。无模型调用时为空数组 |
+| token_usage.calls[].id | 计量标识，重复保存相同计量不重复累加 |
+| token_usage.calls[].scope | root_selection 指令取根气；page_interpretation 后台 AI 解读；agent_context 外部 Agent 无法归属；historical 同一旧卦例原有用量未记录 |
+| token_usage.calls[].provider_id | 可选，已配置模型提供商 ID；不保存密钥或配置对象 |
+| token_usage.calls[].status / input_tokens / output_tokens / cached_tokens / total_tokens | 本条明细的状态与用量，含义同上；agent_context 和 historical 只是未知占位，不代表观测到一次 API 请求 |
+
+## Token 口径
+
+从模型响应的 usage 读取实际报告值，不按字数估算。纯本地起卦为 0；旧记录、接口未报告或请求超时不能补成 0。
+后台解读失败但模型已返回 usage 时仍保存用量；未配置模型、未发起请求为 0。
+Agent 在插件外选择根气，工具内没有模型请求；外部对话可能包含其他任务，不能把整段对话 Token 算在此卦，故标为 external。
+目前统计插件直接请求模型的输入与输出，不包括主 Agent 其他轮次、平台重试或供应商未返回的消耗，也不是金额账单。
+多条明细汇总时，只要任一条某项未知，该汇总项即为 null；已知部分仍可在 calls 中查看。
+同一消息的相同卦例仍只算一次起卦，实际重复的模型请求用量则累计；查看、预览和导出不会增加用量。
 
 ## 计数口径与恢复
 
@@ -115,22 +140,32 @@ class CaseStore:
             data = self._read()
             for existing in data["records"]:
                 if existing["id"] == record["id"]:
+                    if record.get("token_usage") is not None:
+                        combined = merge_usage(
+                            existing.get("token_usage"), record["token_usage"]
+                        )
+                        if combined != existing.get("token_usage"):
+                            existing["token_usage"] = combined
+                            self._write(data)
                     return existing
             data["records"].append(record)
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            fd, name = tempfile.mkstemp(
-                prefix="cases-", suffix=".tmp", dir=self.path.parent
-            )
-            try:
-                with os.fdopen(fd, "w", encoding="utf-8") as out:
-                    json.dump(data, out, ensure_ascii=False, separators=(",", ":"))
-                    out.write("\n")
-                    out.flush()
-                    os.fsync(out.fileno())
-                os.replace(name, self.path)
-            finally:
-                Path(name).unlink(missing_ok=True)
+            self._write(data)
             return record
+
+    def _write(self, data):
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        fd, name = tempfile.mkstemp(
+            prefix="cases-", suffix=".tmp", dir=self.path.parent
+        )
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as out:
+                json.dump(data, out, ensure_ascii=False, separators=(",", ":"))
+                out.write("\n")
+                out.flush()
+                os.fsync(out.fileno())
+            os.replace(name, self.path)
+        finally:
+            Path(name).unlink(missing_ok=True)
 
     def get(self, record_id):
         with self._lock:
@@ -213,7 +248,7 @@ class CaseStore:
         directory = Path(directory)
         directory.mkdir(parents=True, exist_ok=True)
         content = json.dumps(data, ensure_ascii=False, separators=(",", ":")) + "\n"
-        digest = hashlib.sha256(content.encode()).hexdigest()[:16]
+        digest = hashlib.sha256((content + EXPORT_GUIDE).encode()).hexdigest()[:16]
         target = directory / f"wuxing-cases-{digest}.zip"
         # Old downloads are disposable caches; the authoritative cases.json is
         # never pruned. Leave recent files alone while Dashboard may stream them.

@@ -68,6 +68,9 @@ def main():
             return types.SimpleNamespace(
                 role="assistant",
                 completion_text="【离线模拟 AI，仅供页面验收】程序已经给出独立判定。请结合逐轮过程与资料约定复核；应期单位未定，不应当作实际日期。",
+                usage=types.SimpleNamespace(
+                    input_other=240, input_cached=80, output=96
+                ),
             )
 
     plugin = module.WuxingNumberDivinationPlugin(

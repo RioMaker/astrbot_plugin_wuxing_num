@@ -18,6 +18,7 @@ from .engine import parse_five_digits
 from .kernels import KERNELS, calculate
 from .question_policy import question_error
 from .reading import build_reading, build_symbolism
+from .token_usage import usage_snapshot
 
 PAGE_DEFAULTS = {
     "kernel_id": "legacy_v1",
@@ -260,9 +261,13 @@ class ManagementMixin:
                 "image_error": "图片生成失败或正文过长，完整文字结果仍可查看。",
             }
 
-    async def _page_interpret(self, question, result, provider_id):
-        if not provider_id:
-            return "", "未配置后台测试模型，请在设置中选择已有模型。"
+    async def _page_interpret(self, question, result, provider_id, *, usage=None):
+        if not provider_id or not callable(getattr(self.context, "llm_generate", None)):
+            return "", "未配置可用的后台测试模型，请在设置中选择已有模型。"
+        if usage is not None:
+            usage.update(
+                usage_snapshot(scope="page_interpretation", provider_id=provider_id)
+            )
         try:
             response = await asyncio.wait_for(
                 self.context.llm_generate(
@@ -288,6 +293,14 @@ class ManagementMixin:
                     "command_analysis_timeout_seconds", 60, 5, 180
                 ),
             )
+            if usage is not None:
+                usage.update(
+                    usage_snapshot(
+                        scope="page_interpretation",
+                        response=response,
+                        provider_id=provider_id,
+                    )
+                )
             text = str(getattr(response, "completion_text", "") or "").strip()
             if not text or getattr(response, "role", "") == "err":
                 return "", "模型未返回有效解读。"
@@ -333,6 +346,7 @@ class ManagementMixin:
             ai_text, ai_error = "", ""
             with_ai = payload.get("with_ai", False)
             attempted = False
+            token_usage = usage_snapshot()
             if with_ai:
                 provider = str(
                     self.config.get("page_provider_id")
@@ -343,7 +357,7 @@ class ManagementMixin:
                     getattr(self.context, "llm_generate", None)
                 )
                 ai_text, ai_error = await self._page_interpret(
-                    question, result, provider
+                    question, result, provider, usage=token_usage
                 )
             record = self._case_record(
                 result,
@@ -364,6 +378,7 @@ class ManagementMixin:
                     else "not_requested",
                     "ai_interpretation": ai_text,
                     "ai_error": ai_error,
+                    "token_usage": token_usage,
                 },
             )
             await asyncio.to_thread(store.add, record)

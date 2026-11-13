@@ -26,7 +26,8 @@
         <div id="preview-empty" class="empty"><div class="orbit" aria-hidden="true"><b>水</b><b>木</b><b>火</b><b>土</b><b>金</b><span>五行流转</span></div><p>数字为起点，过程可追溯</p><small>此处展示实际内核生成的图片</small></div>
         <img id="chart" class="chart" alt="本次数字卦图，文字推演见下方" hidden>
         <p id="image-warning" class="hint" hidden></p>
-        <details id="reading-details" hidden><summary>查看程序推演与 AI 解读</summary><pre id="reading"></pre><h4 id="ai-title">AI 解读</h4><pre id="ai-reading"></pre></details>
+        <p id="result-tokens" class="hint" hidden></p>
+        <details id="reading-details" hidden><summary>查看程序推演、AI 解读与 Token 用量</summary><pre id="reading"></pre><h4 id="ai-title">AI 解读</h4><pre id="ai-reading"></pre><h4>Token 用量</h4><pre id="result-token-detail"></pre></details>
       </div></div>
     </section>
 
@@ -53,10 +54,10 @@
     <section id="tab-history" class="tab" hidden>
       <div class="section-heading"><div><p class="eyebrow">04 / ARCHIVE</p><h2>历史卦例</h2><p class="muted">保存问题、数字、问卦人、时间与当时解读。图片按需生成，卦例库只存文字。</p></div><button class="primary" id="export-all">导出所有卦例</button></div>
       <div class="toolbar"><label>记录来源<select id="history-source"><option value="all">全部记录</option><option value="official">正式起卦</option><option value="test">后台测试</option></select></label><button class="secondary" id="refresh-history">刷新</button><span class="hint">导出 ZIP 包含完整 cases.json 与说明.md，不受筛选和分页影响。</span></div>
-      <div class="panel table-scroll"><table class="history-table"><thead><tr><th>时间 / 来源</th><th>问卦人 / 群</th><th>问题</th><th>数字 / 内核</th><th>判定</th><th>解读</th><th>详情</th></tr></thead><tbody id="history-rows"></tbody></table></div>
+      <div class="panel table-scroll"><table class="history-table"><thead><tr><th>时间 / 来源</th><th>问卦人 / 群</th><th>问题</th><th>数字 / 内核</th><th>判定</th><th>解读</th><th>Token 总计</th><th>详情</th></tr></thead><tbody id="history-rows"></tbody></table></div>
       <div class="pager"><button class="secondary" id="history-prev">上一页</button><span id="history-page">第 1 页</span><button class="secondary" id="history-next">下一页</button></div>
-      <dialog id="history-dialog"><div class="preview-heading"><h3>卦例详情</h3><button id="close-dialog" class="secondary">关闭</button></div><p id="history-detail-meta" class="muted"></p><pre id="history-detail-reading"></pre><h4>AI 解读</h4><pre id="history-detail-ai"></pre><p id="history-image-warning" class="hint"></p><img id="history-chart" class="chart" alt="历史数字卦预览"></dialog>
+      <dialog id="history-dialog"><div class="preview-heading"><h3>卦例详情</h3><button id="close-dialog" class="secondary">关闭</button></div><p id="history-detail-meta" class="muted"></p><h4>Token 用量</h4><pre id="history-detail-tokens"></pre><pre id="history-detail-reading"></pre><h4>AI 解读</h4><pre id="history-detail-ai"></pre><p id="history-image-warning" class="hint"></p><img id="history-chart" class="chart" alt="历史数字卦预览"></dialog>
     </section>
-    <footer>五行数字卦 · v2.0 <span>每个结果，都保留来路。</span></footer>
+    <footer>五行数字卦 · v2.1 <span>每个结果，都保留来路。</span></footer>
   </div><script type="module" src="./app.js"></script>
 </body></html>

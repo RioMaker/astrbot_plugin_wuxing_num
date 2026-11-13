@@ -26,6 +26,7 @@ from .management import ManagementMixin
 from .question_policy import question_error
 from .reading import Symbolism, build_reading, build_symbolism
 from .renderer import ChartRenderError, WuxingChartRenderer
+from .token_usage import usage_snapshot
 
 PLUGIN_NAME = "wuxing_num"
 DATA_DIR = Path("data") / "plugin_data" / PLUGIN_NAME
@@ -48,7 +49,7 @@ MANUAL_ROOT_HINT = (
     PLUGIN_NAME,
     "haxif",
     "以五个数字判断五行流转并生成山水光效象意卦图；只响应专用命令或专用 Agent 工具。",
-    "2.0.0",
+    "2.1.0",
 )
 class WuxingNumberDivinationPlugin(ManagementMixin, DailyAIQuotaMixin, Star):
     AI_DAILY_LABEL = "五行数字卦"
@@ -75,7 +76,9 @@ class WuxingNumberDivinationPlugin(ManagementMixin, DailyAIQuotaMixin, Star):
             self._case_store = CaseStore(DATA_DIR / "cases.json")
         return self._case_store
 
-    async def _record_cast(self, event, result, question, reading, source, root_source):
+    async def _record_cast(
+        self, event, result, question, reading, source, root_source, token_usage=None
+    ):
         def field(method, fallback=""):
             getter = getattr(event, method, None)
             try:
@@ -117,6 +120,15 @@ class WuxingNumberDivinationPlugin(ManagementMixin, DailyAIQuotaMixin, Star):
             "ai_status": "not_requested",
             "ai_interpretation": "",
             "ai_error": "",
+            "token_usage": token_usage
+            if token_usage is not None
+            else usage_snapshot(
+                scope="agent_context"
+                if source == "agent"
+                else "local"
+                if root_source == "手动指定"
+                else "root_selection"
+            ),
         }
         try:
             record = self._case_record(result, question, reading, identity)
@@ -305,7 +317,7 @@ class WuxingNumberDivinationPlugin(ManagementMixin, DailyAIQuotaMixin, Star):
         )
 
     async def _select_root(
-        self, event, question: str, kernel_id=None
+        self, event, question: str, kernel_id=None, *, usage=None
     ) -> tuple[str | None, str]:
         """The only model call selects a root from the question alone."""
         lease = None
@@ -343,6 +355,14 @@ class WuxingNumberDivinationPlugin(ManagementMixin, DailyAIQuotaMixin, Star):
                     "command_analysis_timeout_seconds", 60, 5, 180
                 ),
             )
+            if usage is not None:
+                usage.update(
+                    usage_snapshot(
+                        scope="root_selection",
+                        response=response,
+                        provider_id=provider_id,
+                    )
+                )
             root = str(getattr(response, "completion_text", "") or "").strip()
             if root not in ELEMENTS or getattr(response, "role", "") == "err":
                 raise ValueError("模型未返回唯一有效根气")
@@ -443,11 +463,15 @@ class WuxingNumberDivinationPlugin(ManagementMixin, DailyAIQuotaMixin, Star):
                 yield event.plain_result(error)
                 return
             root_source = "手动指定"
+            token_usage = usage_snapshot()
             if root is None:
                 if not self.config.get("command_ai_analysis_enabled", True):
                     yield event.plain_result("AI 取根气已关闭。" + MANUAL_ROOT_HINT)
                     return
-                root, error = await self._select_root(event, question, kernel_id)
+                token_usage = usage_snapshot(scope="root_selection")
+                root, error = await self._select_root(
+                    event, question, kernel_id, usage=token_usage
+                )
                 if root is None:
                     yield self._caster_result(event, error + "\n" + MANUAL_ROOT_HINT)
                     return
@@ -464,7 +488,7 @@ class WuxingNumberDivinationPlugin(ManagementMixin, DailyAIQuotaMixin, Star):
             reading = build_reading(result)
             local_note = self._result_note(text, root_source)
             history_note = await self._record_cast(
-                event, result, question, reading, "command", root_source
+                event, result, question, reading, "command", root_source, token_usage
             )
             if history_note:
                 local_note += "\n" + history_note

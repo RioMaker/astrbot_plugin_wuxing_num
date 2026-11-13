@@ -7,6 +7,28 @@ const notify = (text, kind = '') => { $('notice').textContent = text; $('notice'
 const sourceName = value => ({command:'指令', agent:'Agent 工具', page_test:'后台测试'}[value] || value);
 const displayTime = value => new Date(value).toLocaleString('zh-CN', {timeZone:'Asia/Shanghai', hour12:false});
 const textNode = (tag, value, className = '') => { const n = document.createElement(tag); n.textContent = value; n.className = className; return n; };
+const tokenNumber = value => Number.isSafeInteger(value) && value >= 0 ? value.toLocaleString('zh-CN') : '未知';
+const tokenScope = scope => ({root_selection:'指令取根气',page_interpretation:'后台 AI 解读',agent_context:'外部 Agent',historical:'旧记录'}[scope] || scope);
+function tokenSummary(record) {
+  const usage = record.token_usage;
+  if (!usage) return '未记录';
+  if (usage.status === 'not_used') return '0 · 未请求模型';
+  if (usage.status === 'external') return '未知 · 外部 Agent';
+  return tokenNumber(usage.total_tokens) + (usage.status === 'partial' ? ' · 部分已知' : '');
+}
+function tokenDetail(record) {
+  const usage = record.token_usage;
+  if (!usage) return '旧卦例未记录 Token，无法补算。';
+  const counts = data => `输入 ${tokenNumber(data.input_tokens)} · 输出 ${tokenNumber(data.output_tokens)} · 缓存命中 ${tokenNumber(data.cached_tokens)} · 总计 ${tokenNumber(data.total_tokens)}`;
+  const lines = [`Token：${tokenSummary(record)}`, counts(usage)];
+  for (const [index, call] of (usage.calls || []).entries()) {
+    lines.push(`${index + 1}. ${tokenScope(call.scope)}${call.provider_id ? ` · ${call.provider_id}` : ''}\n${counts(call)}`);
+  }
+  if (usage.status === 'external') lines.push('根气来自外部 Agent 对话，无法准确拆分本卦消耗，未将整段对话算入。');
+  if (usage.status === 'unknown' || usage.status === 'partial') lines.push('未返回的用量保留未知，不按文字长度估算。');
+  lines.push('缓存命中已包含在输入中，不重复加到总计。');
+  return lines.join('\n');
+}
 
 async function busy(button, action, label = '处理中…') {
   const before = button.textContent; button.disabled = true; button.textContent = label;
@@ -68,6 +90,8 @@ function showResult(data) {
   $('reading-details').hidden = false; $('reading-details').open = !data.image;
   $('reading').textContent = record.reading;
   $('ai-reading').textContent = record.ai_interpretation || record.ai_error || '本次未请求 AI 解读。';
+  $('result-tokens').hidden = false; $('result-tokens').textContent = `Token：${tokenSummary(record)}`;
+  $('result-token-detail').textContent = tokenDetail(record);
 }
 $('test-form').addEventListener('submit', event => {
   event.preventDefault();
@@ -102,10 +126,12 @@ async function openHistory(record) {
   $('history-dialog').showModal(); $('history-detail-meta').textContent = `${displayTime(record.created_at)} · ${record.user_name || record.user_id} · ${record.numbers} · ${kernelName(record.kernel)}`;
   $('history-detail-reading').textContent = `${record.question}\n\n${record.reading}`;
   $('history-detail-ai').textContent = record.ai_interpretation || record.ai_error || '未请求 AI 解读。';
+  $('history-detail-tokens').textContent = tokenDetail(record);
   $('history-chart').hidden = true; $('history-chart').removeAttribute('src'); $('history-image-warning').textContent = '正在生成历史卦图预览…';
   try {
     const data = await bridge.apiGet(`history/${record.id}/preview`);
     if (version !== previewVersion) return;
+    $('history-detail-tokens').textContent = tokenDetail(data.record);
     $('history-image-warning').textContent = data.image_error || '';
     if (data.image) { $('history-chart').src = data.image; $('history-chart').hidden = false; }
   } catch (e) { if (version === previewVersion) $('history-image-warning').textContent = e.message; }
@@ -123,9 +149,9 @@ async function refreshHistory() {
     const numbers = textNode('td',record.numbers); numbers.append(textNode('small',kernelName(record.kernel)));
     const verdict = document.createElement('td'); verdict.append(textNode('span',record.result.verdict,'badge'));
     const action = document.createElement('td'), button = textNode('button','查看 / 预览','secondary'); button.addEventListener('click',() => openHistory(record)); action.append(button);
-    tr.append(time,who,textNode('td',record.question),numbers,verdict,textNode('td',record.ai_interpretation ? '有 AI 解读' : record.ai_status === 'failed' ? 'AI 失败' : '程序解卦'),action); return tr;
+    tr.append(time,who,textNode('td',record.question),numbers,verdict,textNode('td',record.ai_interpretation ? '有 AI 解读' : record.ai_status === 'failed' ? 'AI 失败' : '程序解卦'),textNode('td',tokenSummary(record)),action); return tr;
   }));
-  if (!data.records.length) { const tr = document.createElement('tr'), td = textNode('td','暂无卦例。可先到起卦实验室生成一条测试记录。','muted'); td.colSpan = 7; tr.append(td); $('history-rows').append(tr); }
+  if (!data.records.length) { const tr = document.createElement('tr'), td = textNode('td','暂无卦例。可先到起卦实验室生成一条测试记录。','muted'); td.colSpan = 8; tr.append(td); $('history-rows').append(tr); }
   const pages = Math.max(1,Math.ceil(data.total/data.limit)); $('history-page').textContent = `共 ${data.total} 条 · 第 ${data.page} / ${pages} 页`;
   $('history-prev').disabled = data.page <= 1; $('history-next').disabled = data.page >= pages;
 }
